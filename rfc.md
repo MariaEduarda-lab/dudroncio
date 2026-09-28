@@ -4,7 +4,7 @@
 |---|---|
 | **Time** | <preencher nomes do time> |
 | **Data** | 27/09/2026 |
-| **Versão** | 2 — modelo PJ consolidado |
+| **Versão** | 3 — modelo PJ e blindagem transacional |
 
 ## Contextualização
 
@@ -22,6 +22,8 @@ Para o projeto, os dados básicos da empresa são CNPJ, razão social, nome fant
 
 `financial_transaction` representa a operação única e seu comprovante. `account_movement` representa cada efeito no saldo e cada linha do extrato: um PIX de R$ 100,00 com tarifa de R$ 2,00 produz uma transação, um movimento de débito de 10.000 centavos e outro de tarifa de 200 centavos. `account_status_history` não cria outra conta: conserva quando e por que a única conta daquele CNPJ mudou de estado. `transaction_risk_analysis` conserva a decisão antifraude e um motivo legível. Entidades expostas pela API têm `..._key`; tabelas internas de detalhe usam somente `id`.
 
+**Como a entrega de extrato é atendida:** o extrato é a representação retornada por `GET /accounts/{account_key}/transactions`, não uma tabela adicional. A API recebe período e paginação, busca os `account_movement` daquela conta, associa cada movimento à sua `financial_transaction` e devolve saldo inicial, créditos, débitos, tarifas, estornos e saldo final. Não persistir uma cópia do extrato evita divergência quando uma transação é estornada. O índice `(account_id, created_at, id)` mantém a consulta eficiente e a ordenação estável.
+
 - **Manter exatamente o modelo inicial** — descartado porque `extrato` duplicaria dados, a tarifa ficaria invertida em relação à transação, `destino` seria texto sem estrutura e não haveria trilha capaz de reconciliar o saldo. Ganharia se o objetivo fosse apenas uma demonstração descartável, sem concorrência ou auditoria.
 - **Calcular sempre o saldo pela soma das transações** — descartado porque encarece toda consulta e torna bloqueio de saldo concorrente mais difícil. Ganharia em um livro-razão completo, com infraestrutura de ledger e projeções assíncronas.
 - **Guardar somente o saldo na conta** — descartado porque é rápido, mas não explica como o saldo foi formado nem produz um extrato auditável. Ganharia se não existisse exigência de histórico financeiro.
@@ -29,6 +31,8 @@ Para o projeto, os dados básicos da empresa são CNPJ, razão social, nome fant
 - **Criar a entidade `bank`** — descartado porque há um único banco, que é o próprio sistema, e `clientes_id` criaria uma relação redundante. Ganharia em uma plataforma multi-instituição; nesse caso, a entidade representaria instituições participantes, não balanço financeiro mutável.
 
 As premissas desta versão são: clientes são pessoas jurídicas identificadas por CNPJ; cada cliente pode ter uma conta no MVP; valores são inteiros em centavos; chaves UUID são expostas pela API e IDs inteiros ficam internos; senha nunca é salva em texto puro, apenas como `password_hash`; token de acesso não é atributo permanente do cliente e, se autenticação entrar no escopo, deverá ser expirável e armazenado somente como hash. Dados de destinatário externo são fotografados na transação para que mudanças posteriores não alterem o comprovante.
+
+Os controles de identidade, autenticação, autorização, concorrência, antifraude e auditoria estão detalhados no [documento de blindagem por camadas](docs/blindagem.md).
 
 ## Implementação
 
@@ -41,10 +45,11 @@ As premissas desta versão são: clientes são pessoas jurídicas identificadas 
 | `POST` | `/clients/{client_key}/accounts` | Abre conta | tipo da conta; `client_key` no caminho | `201` com `account_key`; `400` corpo inválido; `404` cliente inexistente; `409` cliente bloqueado ou já possui a conta permitida. Não é idempotente nesta versão. |
 | `GET` | `/accounts/{account_key}` | Consulta conta e saldo | UUID no caminho | `200`; `404` chave inexistente. Idempotente por ser somente leitura. |
 | `PATCH` | `/accounts/{account_key}` | Bloqueia, reativa ou encerra conta | `status`, `reason` | `200`; `400` corpo inválido; `404` conta inexistente; `409` transição de estado proibida. Idempotente quando repete o mesmo estado e motivo. |
-| `POST` | `/accounts/{account_key}/transactions` | Solicita PIX ou TED de saída | cabeçalho `Idempotency-Key`; `type`, `amount_cents`, dados estruturados do destino | `201` criada/concluída; `200` ao repetir a mesma chave e o mesmo corpo; `400` corpo inválido; `404` conta inexistente; `409` chave reutilizada com corpo diferente ou conta inativa; `422` saldo/limite insuficiente, destino inválido ou risco recusado; `503` provedor externo indisponível. Idempotente pela restrição única `(account_id, idempotency_key)`. |
+| `POST` | `/accounts/{account_key}/transactions` | Cria intenção PIX/TED com snapshot imutável | cabeçalho `Idempotency-Key`; `type`, `amount_cents`, identificador do destino | `201` em `AWAITING_AUTHORIZATION`; `200` ao repetir a mesma chave e corpo; `400` corpo/campo proibido; `404` conta inexistente/alheia; `409` chave reutilizada com outro corpo ou conta inativa; `422` destino, limite ou risco recusado. Idempotente por `(account_id, idempotency_key)`. |
 | `POST` | `/webhooks/transactions` | Registra PIX ou TED de entrada confirmado pela rede | autenticação interna; `external_reference`, `type`, `amount_cents`, conta de destino e remetente | `201` crédito criado; `200` ao repetir a mesma referência e corpo; `400` corpo inválido; `404` conta destino inexistente; `409` referência repetida com conteúdo diferente ou conta encerrada. Idempotente pela unicidade de `external_reference`. |
-| `GET` | `/transactions/{transaction_key}` | Consulta estado e comprovante | UUID no caminho | `200`; `404` chave inexistente. Idempotente por ser somente leitura. |
-| `GET` | `/accounts/{account_key}/transactions?created_from=...&created_to=...&limit=...&page=...` | Retorna o extrato por lançamentos | período e paginação na query string | `200` com saldos inicial/final e lançamentos; `400` período/paginação inválidos; `404` conta inexistente. Idempotente por ser somente leitura. |
+| `POST` | `/transactions/{transaction_key}/authorizations` | Confirma exatamente destino, valor e tarifa do snapshot | prova de autenticação de uso único; nenhum dado financeiro | `200/202` autorizada ou em processamento; `400` campo financeiro enviado; `401` prova inválida; `404` transação inexistente/alheia; `409` expirada, já autorizada ou fingerprint divergente; `422` risco/saldo/limite recusado. Idempotente pela transação e desafio de uso único. |
+| `GET` | `/transactions/{transaction_key}` | Consulta estado e comprovante | UUID no caminho | `200`; `404` chave inexistente ou alheia. Idempotente por ser somente leitura. |
+| `GET` | `/accounts/{account_key}/transactions?created_from=...&created_to=...&limit=...&page=...` | Entrega o extrato financeiro calculado a partir dos movimentos | período e paginação na query string | `200` com saldos inicial/final e lançamentos; `400` período/paginação inválidos; `404` conta inexistente. Idempotente por ser somente leitura. |
 
 ### Banco de Dados (Somente diagrama)
 
@@ -55,10 +60,11 @@ erDiagram
     ACCOUNT ||--o{ ACCOUNT_STATUS_HISTORY : "tem historico"
     ACCOUNT o|--o{ FINANCIAL_TRANSACTION : "origina"
     ACCOUNT o|--o{ FINANCIAL_TRANSACTION : "recebe"
-    ACCOUNT ||--o{ ACCOUNT_MOVEMENT : "tem movimentos"
+    ACCOUNT ||--o{ ACCOUNT_MOVEMENT : "movimentos formam extrato"
     FINANCIAL_TRANSACTION ||--|{ ACCOUNT_MOVEMENT : "gera"
     TARIFF_RULE o|--o{ FINANCIAL_TRANSACTION : "precifica quando aplicavel"
     FINANCIAL_TRANSACTION ||--o| TRANSACTION_RISK_ANALYSIS : "e analisada"
+    LEGAL_REPRESENTATIVE ||--o{ FINANCIAL_TRANSACTION : "solicita e autoriza"
 
     LEGAL_ENTITY_CLIENT {
         bigint id PK "interno"
@@ -132,13 +138,18 @@ erDiagram
         bigint origin_account_id FK "nulo na entrada externa"
         bigint destination_account_id FK "nulo na saida externa"
         bigint tariff_rule_id FK
+        bigint requested_by_representative_id FK
+        bigint authorized_by_representative_id FK "nulo ate autorizacao"
         uuid idempotency_key "evita envio duplicado"
         varchar external_reference UK "id recebido da rede"
         varchar request_fingerprint "confere repeticao"
+        varchar authorization_fingerprint "vincula destino valor e tarifa"
+        timestamptz authorization_expires_at "validade do desafio"
+        varchar authorization_method "nulo ate autorizacao"
         varchar type "PIX TED"
         bigint amount_cents "10000 representa R 100"
         bigint fee_cents "tarifa cobrada nesta operacao"
-        varchar status "PENDING PROCESSING COMPLETED FAILED REVERSED"
+        varchar status "PENDING AWAITING_AUTHORIZATION PROCESSING COMPLETED FAILED REVERSED"
         varchar beneficiary_name
         varchar beneficiary_document
         varchar destination_pix_key "somente PIX"
@@ -147,6 +158,7 @@ erDiagram
         varchar destination_account "conta destino da TED"
         timestamptz created_at
         timestamptz updated_at
+        timestamptz authorized_at "opcional"
         timestamptz completed_at "opcional"
     }
 
@@ -158,7 +170,7 @@ erDiagram
         varchar movement_type "PRINCIPAL FEE REVERSAL"
         bigint amount_cents "valor do movimento"
         bigint balance_after_cents "saldo apos movimento"
-        timestamptz created_at
+        timestamptz created_at "indice com account_id e id"
     }
 
     TARIFF_RULE {
@@ -211,12 +223,14 @@ erDiagram
 
 **PIX/TED de saída — caminho feliz**
 
-1. O serviço localiza a conta e procura `(account_id, idempotency_key)`. Se já existir com o mesmo `request_fingerprint`, devolve o resultado anterior; com corpo diferente, responde `409`.
-2. Valida conta ativa, destino, valor e limites. Calcula a regra de tarifa vigente e cria a transação `PENDING` e copia para `amount_cents` e `fee_cents` os valores daquela operação, que não mudarão se a regra tarifária for alterada no futuro.
-3. A análise de risco verifica, no mínimo, valor, frequência, horário, destinatário novo, tentativas recentes e divergências cadastrais. `BLOCKED` recusa; `REVIEW` mantém a transação sem movimentar dinheiro; `APPROVED` continua. A decisão e o motivo ficam em `transaction_risk_analysis`.
-4. O banco trava a linha da conta (`SELECT ... FOR UPDATE`), relê o saldo e verifica `saldo >= valor + tarifa`.
-5. Na mesma transação ACID, cria os lançamentos `PRINCIPAL` e `FEE`, atualiza o saldo e muda o estado da transação. Qualquer falha causa rollback de tudo.
-6. No MVP, a confirmação externa é simulada. Em integração real, o débito fica `PROCESSING`, o connector usa timeout e a resposta nunca declara sucesso antes da confirmação. Falha definitiva gera lançamento de estorno; timeout mantém o estado inconclusivo para consulta e reconciliação.
+1. O serviço autoriza o representante na conta e procura `(account_id, idempotency_key)`. Se já existir com o mesmo `request_fingerprint`, devolve o resultado anterior; com corpo diferente, responde `409`.
+2. Valida conta ativa, valor e limites, resolve o favorecido e calcula a tarifa no servidor. Grava origem, destino resolvido, tipo, valor, tarifa, solicitante e expiração como snapshot imutável em `AWAITING_AUTHORIZATION`.
+3. A análise de risco verifica valor, frequência, horário, dispositivo, destinatário novo, tentativas e alterações cadastrais. `BLOCKED` recusa; `REVIEW` não movimenta; `APPROVED` permite solicitar autenticação adicional.
+4. O servidor mostra favorecido, documento mascarado, valor e tarifa e gera desafio de uso único vinculado ao `authorization_fingerprint`. A confirmação recebe somente a prova de autenticação; qualquer tentativa de reenviar destino, valor, tarifa ou origem recebe `400`.
+5. Ao confirmar, o servidor relê o snapshot e confere fingerprint, expiração, sessão, titularidade e estado. Mudança exige cancelar e criar outra transação; não existe `PATCH`.
+6. O banco trava a conta com `SELECT ... FOR UPDATE`, relê o saldo e verifica `saldo >= valor + tarifa`.
+7. Na mesma transação ACID, marca `PROCESSING`, cria movimentos `PRINCIPAL` e `FEE` e atualiza o saldo. Qualquer falha causa rollback.
+8. No MVP, a confirmação externa é simulada. Em integração real, sucesso vira `COMPLETED`, falha definitiva gera `REVERSAL` e timeout permanece inconclusivo para consulta e reconciliação.
 
 **PIX/TED de saída — falha: concorrência, risco ou indisponibilidade**
 
@@ -237,8 +251,9 @@ erDiagram
 
 **Consulta de extrato — caminho feliz**
 
-1. O serviço valida conta, período e paginação e consulta `account_movement` ordenado por `created_at` e `id`.
-2. Retorna saldo inicial, saldo final e os lançamentos do período, incluindo tarifa como linha própria e referência à `transaction_key`.
+1. O serviço valida conta, período e paginação e consulta `account_movement` pelo índice `(account_id, created_at, id)`.
+2. Associa cada movimento à `financial_transaction` para obter PIX/TED, contraparte, estado e `transaction_key`.
+3. Retorna saldo inicial, lista ordenada de créditos, débitos, tarifas e estornos, e saldo final. Portanto, o extrato é produzido sob demanda sem duplicar os movimentos em outra tabela.
 
 **Consulta de extrato — falha: período inválido**
 
