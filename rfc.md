@@ -52,151 +52,107 @@ Os controles de identidade, autenticação, autorização, concorrência, antifr
 | `GET` | `/accounts/{account_key}/transactions?created_from=...&created_to=...&limit=...&page=...` | Entrega o extrato financeiro calculado a partir dos movimentos | período e paginação na query string | `200` com saldos inicial/final e lançamentos; `400` período/paginação inválidos; `404` conta inexistente. Idempotente por ser somente leitura. |
 
 ### Banco de Dados (Somente diagrama)
+# Modelo de dados — v2
+
+Diagrama no formato pedido pela seção "Banco de Dados (Somente diagrama)" do RFC. Os campos de tipo enumerado aparecem como `enum`, com os valores possíveis no comentário.
 
 ```mermaid
 erDiagram
-    LEGAL_ENTITY_CLIENT ||--|{ LEGAL_REPRESENTATIVE : "autoriza"
-    LEGAL_ENTITY_CLIENT ||--o| ACCOUNT : "possui no MVP"
-    ACCOUNT ||--o{ ACCOUNT_STATUS_HISTORY : "tem historico"
-    ACCOUNT o|--o{ FINANCIAL_TRANSACTION : "origina"
-    ACCOUNT o|--o{ FINANCIAL_TRANSACTION : "recebe"
-    ACCOUNT ||--o{ ACCOUNT_MOVEMENT : "movimentos formam extrato"
-    FINANCIAL_TRANSACTION ||--|{ ACCOUNT_MOVEMENT : "gera"
-    TARIFF_RULE o|--o{ FINANCIAL_TRANSACTION : "precifica quando aplicavel"
-    FINANCIAL_TRANSACTION ||--o| TRANSACTION_RISK_ANALYSIS : "e analisada"
-    LEGAL_REPRESENTATIVE ||--o{ FINANCIAL_TRANSACTION : "solicita e autoriza"
+    CLIENTE ||--|{ REPRESENTANTE_LEGAL : "tem"
+    CLIENTE ||--|| CONTA : "possui"
+    CONTA |o--o{ TRANSACAO : "origina"
+    CONTA |o--o{ TRANSACAO : "recebe"
+    REPRESENTANTE_LEGAL |o--o{ TRANSACAO : "solicita"
+    REGRA_TARIFA |o--o{ TRANSACAO : "precifica"
+    TRANSACAO ||--|{ HISTORICO_STATUS_TRANSACAO : "registra"
+    TRANSACAO ||--|{ LANCAMENTO : "gera"
+    CONTA ||--o{ LANCAMENTO : "tem"
 
-    LEGAL_ENTITY_CLIENT {
+    CLIENTE {
         bigint id PK "interno"
-        uuid client_key UK "publico"
-        char cnpj UK "14 caracteres normalizados"
-        varchar corporate_name "razao social"
-        varchar trade_name "nome fantasia opcional"
-        varchar legal_nature_code "natureza juridica"
-        date incorporation_date "data de constituicao"
-        varchar cnpj_status "situacao na Receita"
-        varchar primary_activity_code "CNAE principal"
-        bigint declared_monthly_revenue_cents "faturamento informado"
+        uuid id_publico UK "sai na API"
+        char cnpj UK "numerico ou alfanumerico, validado; tambem e a chave Pix"
+        varchar razao_social
+        varchar nome_fantasia "opcional"
+        enum tipo "MEI, PJ, BANCO"
         varchar email
-        varchar phone
-        char postal_code
-        varchar street
-        varchar address_number
-        varchar address_complement "opcional"
-        varchar district
-        varchar city
-        char state
-        char country_code "BR"
-        varchar status "PENDING ACTIVE BLOCKED CLOSED"
-        timestamptz created_at
-        timestamptz updated_at
+        timestamptz criado_em
     }
 
-    LEGAL_REPRESENTATIVE {
+    REPRESENTANTE_LEGAL {
         bigint id PK "interno"
-        uuid representative_key UK "publico"
-        bigint client_id FK
-        char cpf "unico por cliente e protegido"
-        varchar full_name
-        date birth_date
-        varchar email
-        varchar phone
-        varchar role "socio administrador procurador"
-        boolean is_primary
-        varchar password_hash "nunca senha pura"
-        varchar status "PENDING ACTIVE BLOCKED"
-        timestamptz created_at
-        timestamptz updated_at
+        uuid id_publico UK "sai na API e no token"
+        bigint cliente_id FK
+        varchar nome_completo
+        varchar email UK "login, minusculo"
+        varchar senha_hash "nunca a senha pura"
+        timestamptz criado_em
     }
 
-    ACCOUNT {
+    CONTA {
         bigint id PK "interno"
-        uuid account_key UK "publico"
-        bigint client_id FK, UK "uma conta por CNPJ"
-        varchar branch_number "agencia do nosso banco"
-        varchar account_number UK
-        varchar account_check_digit
-        bigint balance_cents "saldo em centavos"
-        varchar status "CREATED ACTIVE BLOCKED CLOSED"
-        timestamptz created_at
-        timestamptz updated_at
+        uuid id_publico UK "sai na API"
+        bigint cliente_id FK, UK "uma conta por cliente"
+        char agencia "0001"
+        char numero_conta UK "8 digitos aleatorios"
+        char digito_verificador "modulo 11"
+        bigint saldo_centavos "nunca negativo; unico campo que muda"
+        timestamptz criado_em
     }
 
-    ACCOUNT_STATUS_HISTORY {
+    REGRA_TARIFA {
         bigint id PK
-        bigint account_id FK
-        varchar from_status
-        varchar to_status
-        varchar reason
-        bigint changed_by_representative_id FK "nulo se alterado pelo sistema"
-        timestamptz created_at
+        enum tipo_cliente "MEI, PJ"
+        enum tipo_transacao "so envios"
+        bigint valor_fixo_centavos
+        timestamptz vigente_desde "preco novo e linha nova"
     }
 
-    FINANCIAL_TRANSACTION {
+    TRANSACAO {
         bigint id PK "interno"
-        uuid transaction_key UK "publico e comprovante"
-        bigint origin_account_id FK "nulo na entrada externa"
-        bigint destination_account_id FK "nulo na saida externa"
-        bigint tariff_rule_id FK
-        bigint requested_by_representative_id FK
-        bigint authorized_by_representative_id FK "nulo ate autorizacao"
-        uuid idempotency_key "evita envio duplicado"
-        varchar external_reference UK "id recebido da rede"
-        varchar request_fingerprint "confere repeticao"
-        varchar authorization_fingerprint "vincula destino valor e tarifa"
-        timestamptz authorization_expires_at "validade do desafio"
-        varchar authorization_method "nulo ate autorizacao"
-        varchar type "PIX TED"
-        bigint amount_cents "10000 representa R 100"
-        bigint fee_cents "tarifa cobrada nesta operacao"
-        varchar status "PENDING AWAITING_AUTHORIZATION PROCESSING COMPLETED FAILED REVERSED"
-        varchar beneficiary_name
-        varchar beneficiary_document
-        varchar destination_pix_key "somente PIX"
-        varchar destination_bank_code "somente TED"
-        varchar destination_branch "agencia destino da TED"
-        varchar destination_account "conta destino da TED"
-        timestamptz created_at
-        timestamptz updated_at
-        timestamptz authorized_at "opcional"
-        timestamptz completed_at "opcional"
+        uuid id_publico UK "sai na API; comprovante"
+        enum tipo "TRANSFERENCIA_INTERNA, PIX_ENVIO, TED_ENVIO, PIX_RECEBIMENTO, TED_RECEBIMENTO"
+        enum status "PENDENTE, CONCLUIDA, FALHOU"
+        bigint conta_origem_id FK "nulo em recebimento"
+        bigint conta_destino_id FK "nulo em envio externo"
+        bigint solicitado_por_representante_id FK "nulo em recebimento"
+        bigint regra_tarifa_id FK "nulo em recebimento"
+        bigint valor_centavos "de 1 centavo a R$ 1 bilhao"
+        bigint tarifa_centavos "cobrada nesta operacao"
+        varchar chave_idempotencia "obrigatoria nos envios; unica por conta de origem"
+        char hash_requisicao "impressao digital do pedido"
+        varchar referencia_externa "id na rede simulada; unica nos recebimentos"
+        varchar contraparte_nome "outra parte no outro banco"
+        varchar contraparte_documento "CPF ou CNPJ"
+        varchar destino_chave_pix "so PIX_ENVIO"
+        char destino_codigo_banco "so TED_ENVIO"
+        varchar destino_agencia "so TED_ENVIO"
+        varchar destino_conta "so TED_ENVIO"
+        timestamptz criado_em
+        timestamptz finalizado_em "nulo enquanto pendente"
     }
 
-    ACCOUNT_MOVEMENT {
+    HISTORICO_STATUS_TRANSACAO {
         bigint id PK
-        bigint account_id FK
-        bigint transaction_id FK
-        varchar direction "DEBIT CREDIT"
-        varchar movement_type "PRINCIPAL FEE REVERSAL"
-        bigint amount_cents "valor do movimento"
-        bigint balance_after_cents "saldo apos movimento"
-        timestamptz created_at "indice com account_id e id"
+        bigint transacao_id FK "uma criacao e um desfecho por transacao"
+        enum status_anterior "nulo na criacao"
+        enum status_novo "PENDENTE, CONCLUIDA, FALHOU"
+        varchar motivo
+        timestamptz criado_em
     }
 
-    TARIFF_RULE {
-        bigint id PK
-        varchar transaction_type "PIX TED"
-        bigint fixed_amount_cents
-        integer percentage_basis_points
-        bigint minimum_amount_cents
-        bigint maximum_amount_cents
-        timestamptz valid_from
-        timestamptz valid_until "opcional"
-        boolean active
-        timestamptz created_at
-        timestamptz updated_at
-    }
-
-    TRANSACTION_RISK_ANALYSIS {
-        bigint id PK
-        bigint transaction_id FK, UK "uma analise por transacao"
-        varchar decision "APPROVED REVIEW BLOCKED"
-        varchar reason_code "ex NEW_BENEFICIARY_HIGH_VALUE"
-        varchar reason_description
-        timestamptz analyzed_at
+    LANCAMENTO {
+        bigint id PK "interno"
+        uuid id_publico UK "sai na API; cursor do extrato"
+        bigint conta_id FK
+        bigint transacao_id FK
+        enum sentido "DEBITO, CREDITO"
+        enum natureza "VALOR, TARIFA, DEVOLUCAO"
+        bigint valor_centavos "sempre positivo"
+        bigint saldo_apos_centavos "vem do RETURNING do UPDATE da conta"
+        timestamptz criado_em
     }
 ```
-
 ### Fluxos
 
 **Cadastro de cliente — caminho feliz**
