@@ -99,3 +99,107 @@ class InvalidBirthdate(QIException):
         description = f"The birthdate {birthdate} is not a real date."
         translation = "A data de nascimento informada não existe."
         super().__init__(title, self.code, http_status, description, translation)
+
+
+class NotFoundClient(QIException):
+    code = "QIT002001"
+
+    def __init__(self, client_key) -> None:
+        super().__init__(
+            "Client not found",
+            self.code,
+            404,
+            f"Client with key {client_key} was not found.",
+            "O cliente informado não foi encontrado.",
+        )
+
+
+class InvalidCnpj(QIException):
+    code = "QIT002002"
+
+    def __init__(self, cnpj) -> None:
+        super().__init__(
+            "Invalid CNPJ",
+            self.code,
+            422,
+            f"The CNPJ {cnpj} is invalid.",
+            "O CNPJ informado não é válido.",
+        )
+
+
+class DuplicatedCnpj(QIException):
+    code = "QIT002003"
+
+    def __init__(self, cnpj) -> None:
+        super().__init__(
+            "CNPJ already registered",
+            self.code,
+            409,
+            f"There is already a client with CNPJ {cnpj}.",
+            "Já existe um cliente cadastrado com este CNPJ.",
+        )
+
+
+class DuplicatedClientEmail(QIException):
+    code = "QIT002004"
+
+    def __init__(self, email) -> None:
+        super().__init__(
+            "Email already registered",
+            self.code,
+            409,
+            f"There is already a client or representative with email {email}.",
+            "Já existe um cadastro com este e-mail.",
+        )
+
+
+class InvalidRepresentativeCpf(QIException):
+    code = "QIT002005"
+
+    def __init__(self, cpf) -> None:
+        super().__init__(
+            "Invalid representative CPF",
+            self.code,
+            422,
+            f"The legal representative CPF {cpf} is invalid.",
+            "O CPF do representante legal não é válido.",
+        )
+
+
+class DuplicatedRepresentativeCpf(QIException):
+    code = "QIT002006"
+
+    def __init__(self, cpf) -> None:
+        super().__init__(
+            "Representative CPF already registered",
+            self.code,
+            409,
+            f"There is already a legal representative with CPF {cpf}.",
+            "Já existe um representante legal cadastrado com este CPF.",
+        )
+
+
+class InvalidRepresentativeBirthdate(QIException):
+    code = "QIT002007"
+
+    def __init__(self, birthdate) -> None:
+        super().__init__(
+            "Invalid representative birthdate",
+            self.code,
+            422,
+            f"The legal representative birthdate {birthdate} is invalid or underage.",
+            "A data de nascimento do representante é inválida ou ele é menor de idade.",
+        )
+
+
+class IneligibleCnpjStatus(QIException):
+    code = "QIT002008"
+
+    def __init__(self, cnpj_status) -> None:
+        super().__init__(
+            "CNPJ status is not eligible",
+            self.code,
+            422,
+            f"A client with CNPJ status {cnpj_status} cannot be activated.",
+            "A situação cadastral do CNPJ não permite ativar o cliente.",
+        )

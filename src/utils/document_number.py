@@ -1,6 +1,7 @@
 CPF_LENGTH = 11
 
 CHECK_DIGIT_POSITIONS = [9, 10]
+CNPJ_LENGTH = 14
 
 
 def is_valid_cpf(document_number: str) -> bool:
@@ -60,5 +61,41 @@ def is_valid_cpf(document_number: str) -> bool:
 
         if digits[position] != expected_digit:
             return False
+
+    return True
+
+
+def only_document_characters(document_number: str) -> str:
+    """Remove a mascara e devolve o identificador em formato canonico."""
+    return "".join(character for character in document_number.upper() if character.isalnum())
+
+
+def is_valid_cnpj(document_number: str) -> bool:
+    """Valida CNPJ numerico ou alfanumerico pelo modulo 11."""
+    normalized = only_document_characters(document_number)
+
+    if len(normalized) != CNPJ_LENGTH or not normalized[:12].isalnum() or not normalized[-2:].isdigit():
+        return False
+
+    if len(set(normalized)) == 1:
+        return False
+
+    # No CNPJ alfanumerico, letras usam seu codigo ASCII menos 48. Para
+    # digitos, a mesma conversao continua produzindo o proprio valor.
+    values = [ord(character) - 48 for character in normalized[:12]]
+    weights = (
+        [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2],
+        [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2],
+    )
+
+    for check_digit_index, current_weights in zip((12, 13), weights):
+        total = sum(values[index] * weight for index, weight in enumerate(current_weights))
+        remainder = total % 11
+        expected_digit = 0 if remainder < 2 else 11 - remainder
+
+        if int(normalized[check_digit_index]) != expected_digit:
+            return False
+
+        values.append(expected_digit)
 
     return True
