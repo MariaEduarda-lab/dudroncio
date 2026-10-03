@@ -30,6 +30,3 @@ class AccountRepository:
             .filter(Account.account_key == account_key)
             .first()
         )
-
-    def account_number_exists(self, account_number: str) -> bool:
-        return self.session.query(Account.id).filter(Account.account_number == account_number).first() is not None
