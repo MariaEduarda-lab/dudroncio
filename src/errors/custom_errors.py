@@ -203,3 +203,55 @@ class IneligibleCnpjStatus(QIException):
             f"A client with CNPJ status {cnpj_status} cannot be registered.",
             "A situação cadastral do CNPJ não permite o cadastro do cliente.",
         )
+
+
+class NotFoundAccount(QIException):
+    code = "QIT003001"
+
+    def __init__(self, account_key) -> None:
+        super().__init__(
+            "Account not found",
+            self.code,
+            404,
+            f"Account with key {account_key} was not found.",
+            "A conta informada não foi encontrada.",
+        )
+
+
+class ClientAlreadyHasAccount(QIException):
+    code = "QIT003002"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Client already has an account",
+            self.code,
+            409,
+            "The client already has the account allowed in this version.",
+            "O cliente já possui a conta permitida nesta versão.",
+        )
+
+
+class ForbiddenAccountStatusTransition(QIException):
+    code = "QIT003003"
+
+    def __init__(self, current_status, new_status) -> None:
+        super().__init__(
+            "Account status transition not allowed",
+            self.code,
+            409,
+            f"An account with status {current_status} cannot change to {new_status}.",
+            "A conta não pode mudar para o status solicitado.",
+        )
+
+
+class AccountWithBalanceCannotBeClosed(QIException):
+    code = "QIT003004"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Account with balance cannot be closed",
+            self.code,
+            409,
+            "Only an account with zero balance can be closed.",
+            "Só é possível encerrar uma conta com saldo zero.",
+        )

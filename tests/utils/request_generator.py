@@ -27,6 +27,37 @@ class RequestGenerator:
         return response.response_status, response.response_json
 
     @staticmethod
+    def POST_account(client_key: str, account_payload: dict = None) -> BaseConnectorResponse:
+        if account_payload is None:
+            account_payload = {}
+        response = ClientRequisition.send(
+            "POST",
+            f"/clients/{client_key}/accounts",
+            payload=account_payload,
+            headers={"INTERNAL-TOKEN": INTERNAL_TOKEN},
+        )
+        return response.response_status, response.response_json
+
+    @staticmethod
+    def GET_account(account_key: str) -> BaseConnectorResponse:
+        response = ClientRequisition.send(
+            "GET",
+            f"/accounts/{account_key}",
+            headers={"INTERNAL-TOKEN": INTERNAL_TOKEN},
+        )
+        return response.response_status, response.response_json
+
+    @staticmethod
+    def PATCH_account(account_key: str, account_payload: dict) -> BaseConnectorResponse:
+        response = ClientRequisition.send(
+            "PATCH",
+            f"/accounts/{account_key}",
+            payload=account_payload,
+            headers={"INTERNAL-TOKEN": INTERNAL_TOKEN},
+        )
+        return response.response_status, response.response_json
+
+    @staticmethod
     def POST_sample_entity(sample_entity_payload: dict) -> BaseConnectorResponse:
         response = ClientRequisition.send(
             "POST",

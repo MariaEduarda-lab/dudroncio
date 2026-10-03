@@ -33,3 +33,4 @@ class Client(Base):
         back_populates="client",
         order_by="asc(LegalRepresentative.id)",
     )
+    account = relationship("Account", back_populates="client", uselist=False)
