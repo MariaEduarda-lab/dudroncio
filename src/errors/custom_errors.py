@@ -203,3 +203,29 @@ class IneligibleCnpjStatus(QIException):
             f"A client with CNPJ status {cnpj_status} cannot be registered.",
             "A situação cadastral do CNPJ não permite o cadastro do cliente.",
         )
+
+
+class NotFoundAccount(QIException):
+    code = "QIT003001"
+
+    def __init__(self, account_key) -> None:
+        super().__init__(
+            "Account not found",
+            self.code,
+            404,
+            f"Account with key {account_key} was not found.",
+            "A conta informada não foi encontrada.",
+        )
+
+
+class ClientAlreadyHasAccount(QIException):
+    code = "QIT003002"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Client already has an account",
+            self.code,
+            409,
+            "The client already has the account allowed in this version.",
+            "O cliente já possui a conta permitida nesta versão.",
+        )

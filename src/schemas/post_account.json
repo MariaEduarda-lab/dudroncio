@@ -1,0 +1,6 @@
+{
+  "title": "PostAccount",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}
