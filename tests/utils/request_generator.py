@@ -8,6 +8,25 @@ INTERNAL_TOKEN = environ.get("INTERNAL_TOKEN", "default_token")
 
 class RequestGenerator:
     @staticmethod
+    def POST_client(client_payload: dict) -> BaseConnectorResponse:
+        response = ClientRequisition.send(
+            "POST",
+            "/clients",
+            payload=client_payload,
+            headers={"INTERNAL-TOKEN": INTERNAL_TOKEN},
+        )
+        return response.response_status, response.response_json
+
+    @staticmethod
+    def GET_client(client_key: str) -> BaseConnectorResponse:
+        response = ClientRequisition.send(
+            "GET",
+            f"/clients/{client_key}",
+            headers={"INTERNAL-TOKEN": INTERNAL_TOKEN},
+        )
+        return response.response_status, response.response_json
+
+    @staticmethod
     def POST_sample_entity(sample_entity_payload: dict) -> BaseConnectorResponse:
         response = ClientRequisition.send(
             "POST",

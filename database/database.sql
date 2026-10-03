@@ -34,3 +34,41 @@ CREATE TABLE sample_entity_status_event(
     event_datetime                  TIMESTAMP NOT NULL,
     created_at                      TIMESTAMP NOT NULL DEFAULT(NOW())
 );
+
+CREATE TABLE client(
+    id                              BIGSERIAL PRIMARY KEY,
+    client_key                      CHAR(36) NOT NULL,
+    cnpj                            VARCHAR(14) NOT NULL,
+    legal_name                      VARCHAR(255) NOT NULL,
+    trade_name                      VARCHAR(255),
+    client_type                     VARCHAR(10) NOT NULL,
+    cnpj_status                     VARCHAR(30) NOT NULL,
+    primary_activity                VARCHAR(255) NOT NULL,
+    monthly_revenue_cents           BIGINT NOT NULL,
+    email                           VARCHAR(255) NOT NULL,
+    phone_number                    VARCHAR(16) NOT NULL,
+    address                         JSONB NOT NULL,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
+    CONSTRAINT uq_client_key UNIQUE(client_key),
+    CONSTRAINT uq_client_cnpj UNIQUE(cnpj),
+    CONSTRAINT uq_client_email UNIQUE(email),
+    CONSTRAINT ck_client_type CHECK (client_type IN ('MEI', 'PJ')),
+    CONSTRAINT ck_client_monthly_revenue CHECK (monthly_revenue_cents >= 0)
+);
+
+CREATE TABLE legal_representative(
+    id                              BIGSERIAL PRIMARY KEY,
+    representative_key              CHAR(36) NOT NULL,
+    client_id                       BIGINT NOT NULL REFERENCES client(id),
+    cpf                             CHAR(11) NOT NULL,
+    full_name                       VARCHAR(255) NOT NULL,
+    birthdate                       DATE NOT NULL,
+    email                           VARCHAR(255) NOT NULL,
+    phone_number                    VARCHAR(16) NOT NULL,
+    role                            VARCHAR(100) NOT NULL,
+    password_hash                   VARCHAR(255) NOT NULL,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
+    CONSTRAINT uq_legal_representative_key UNIQUE(representative_key),
+    CONSTRAINT uq_legal_representative_cpf UNIQUE(cpf),
+    CONSTRAINT uq_legal_representative_email UNIQUE(email)
+);
