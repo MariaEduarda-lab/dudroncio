@@ -207,3 +207,42 @@ class MissingFeeRule(QIException):
             f"There is no fee rule in force for {person_type} {transaction_type}.",
             "Não há tarifa vigente para esta operação.",
         )
+
+
+class NotFoundRecipientAccount(QIException):
+    code = "QIT004001"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Recipient account not found",
+            self.code,
+            404,
+            "No account was found with the informed branch, number and check digit.",
+            "A conta de destino informada não foi encontrada.",
+        )
+
+
+class ReusedTransactionReference(QIException):
+    code = "QIT004002"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Transaction reference reused with different content",
+            self.code,
+            422,
+            "This identification was already used by a transaction with different data.",
+            "Esta identificação já foi usada por uma transação com dados diferentes.",
+        )
+
+
+class AccountNotActive(QIException):
+    code = "QIT004003"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Account is not active",
+            self.code,
+            422,
+            "Only active accounts can send or receive money.",
+            "Só contas ativas podem enviar ou receber dinheiro.",
+        )

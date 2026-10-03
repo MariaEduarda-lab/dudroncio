@@ -1,0 +1,40 @@
+{
+  "title": "PostCentralBankTed",
+  "type": "object",
+  "properties": {
+    "external_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64
+    },
+    "amount_cents": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 100000000000
+    },
+    "recipient": {
+      "type": "object",
+      "properties": {
+        "branch": { "type": "string", "pattern": "^[0-9]{4}$" },
+        "account_number": { "type": "string", "pattern": "^[0-9]{8}$" },
+        "check_digit": { "type": "string", "pattern": "^[0-9]$" }
+      },
+      "required": ["branch", "account_number", "check_digit"],
+      "additionalProperties": false
+    },
+    "payer": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 255 },
+        "document": { "type": "string", "pattern": "^([0-9]{11}|[A-Z0-9]{12}[0-9]{2})$" },
+        "bank_code": { "type": "string", "pattern": "^[0-9]{3}$" },
+        "branch": { "type": "string", "pattern": "^[0-9]{1,4}$" },
+        "account_number": { "type": "string", "pattern": "^[0-9A-Za-z-]{1,20}$" }
+      },
+      "required": ["name", "document", "bank_code", "branch", "account_number"],
+      "additionalProperties": false
+    }
+  },
+  "required": ["external_id", "amount_cents", "recipient", "payer"],
+  "additionalProperties": false
+}

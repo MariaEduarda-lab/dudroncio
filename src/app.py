@@ -9,7 +9,12 @@ from middlewares import (
     register_request_logger_middleware,
     register_session_manager_middleware,
 )
-from resources import AccountResource, ClientResource, HealthCheckResource
+from resources import (
+    AccountResource,
+    CentralBankWebhookResource,
+    ClientResource,
+    HealthCheckResource,
+)
 from utils.logger import setup_logging
 
 
@@ -125,6 +130,7 @@ def create_app() -> FastAPI:
     health_check_resource = HealthCheckResource()
     client_resource = ClientResource()
     account_resource = AccountResource()
+    central_bank_webhook_resource = CentralBankWebhookResource()
 
     application.add_api_route("/", health_check_resource.on_get_home, methods=["GET"])
     application.add_api_route(
@@ -157,6 +163,11 @@ def create_app() -> FastAPI:
         "/accounts/{account_key}",
         account_resource.on_patch_by_key,
         methods=["PATCH"],
+    )
+    application.add_api_route(
+        "/webhook/central_bank/teds",
+        central_bank_webhook_resource.on_post_ted,
+        methods=["POST"],
     )
 
     register_error_handlers(application)

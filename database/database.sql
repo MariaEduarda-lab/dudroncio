@@ -215,3 +215,75 @@ CREATE TRIGGER tg_fee_rule_no_truncate
 INSERT INTO fee_rule (person_type, transaction_type, free_monthly_quota, fee_cents, valid_from) VALUES
     ('PJ', 'PIX_OUT', 20, 99, '2026-01-01 00:00:00-03'),
     ('PJ', 'TED_OUT', 2, 499, '2026-01-01 00:00:00-03');
+
+-- Todo movimento de dinheiro. Nesta etapa so existe o recebimento de TED;
+-- os outros tipos entram com os testes deles.
+CREATE TABLE transaction(
+    id                              BIGSERIAL PRIMARY KEY,
+    transaction_key                 UUID NOT NULL,
+    type                            VARCHAR(20) NOT NULL,
+    amount_cents                    BIGINT NOT NULL,
+    fee_cents                       BIGINT NOT NULL DEFAULT(0),
+    destination_account_id          BIGINT REFERENCES account(id),
+    -- Identificacao dada pelo banco de origem a um recebimento.
+    external_id                     VARCHAR(64),
+    counterparty_name               VARCHAR(255) NOT NULL,
+    counterparty_document           VARCHAR(14) NOT NULL,
+    counterparty_bank_code          CHAR(3) NOT NULL,
+    counterparty_branch             VARCHAR(4) NOT NULL,
+    counterparty_account_number     VARCHAR(20) NOT NULL,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
+    CONSTRAINT uq_transaction_key UNIQUE(transaction_key),
+    CONSTRAINT ck_transaction_type CHECK (type IN ('TED_IN')),
+    CONSTRAINT ck_transaction_amount CHECK (amount_cents BETWEEN 1 AND 100000000000),
+    CONSTRAINT ck_transaction_fee CHECK (fee_cents >= 0),
+    CONSTRAINT ck_transaction_incoming CHECK (
+        type <> 'TED_IN' OR (destination_account_id IS NOT NULL AND external_id IS NOT NULL AND fee_cents = 0)
+    ),
+    CONSTRAINT ck_transaction_document CHECK (counterparty_document ~ '^([0-9]{11}|[A-Z0-9]{12}[0-9]{2})$')
+);
+
+-- O mesmo aviso de recebimento, chegando de novo, nao credita duas vezes.
+-- A identificacao e unica por banco de origem: dois bancos podem usar o
+-- mesmo texto sem um apagar o recebimento do outro.
+CREATE UNIQUE INDEX ux_transaction_incoming_ref
+    ON transaction (type, counterparty_bank_code, external_id)
+    WHERE type IN ('TED_IN');
+
+-- Um lancamento por mudanca de saldo: credito positivo, debito negativo.
+-- A soma dos lancamentos de uma conta e o saldo dela.
+CREATE TABLE entry(
+    id                              BIGSERIAL PRIMARY KEY,
+    entry_key                       UUID NOT NULL,
+    account_id                      BIGINT NOT NULL REFERENCES account(id),
+    transaction_id                  BIGINT NOT NULL REFERENCES transaction(id),
+    entry_type                      VARCHAR(10) NOT NULL,
+    amount_cents                    BIGINT NOT NULL,
+    balance_after_cents             BIGINT NOT NULL,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
+    CONSTRAINT uq_entry_key UNIQUE(entry_key),
+    CONSTRAINT ck_entry_type CHECK (entry_type IN ('VALUE', 'FEE')),
+    CONSTRAINT ck_entry_amount CHECK (amount_cents <> 0),
+    CONSTRAINT ck_entry_balance_after CHECK (balance_after_cents >= 0)
+);
+
+-- Transacoes e lancamentos nunca sao editados nem apagados.
+-- A mensagem e montada no USING, sem o sinal de porcentagem: o
+-- tests/utils/db_utils.py roda este arquivo pelo psycopg2, que leria esse
+-- sinal como parametro (em qualquer lugar do arquivo, ate em comentario).
+CREATE FUNCTION append_only() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION USING
+        MESSAGE = 'A tabela ' || TG_TABLE_NAME || ' so aceita INSERT',
+        ERRCODE = 'restrict_violation';
+END;
+$$;
+
+CREATE TRIGGER tg_transaction_append_only
+    BEFORE UPDATE OR DELETE ON transaction
+    FOR EACH ROW EXECUTE FUNCTION append_only();
+
+CREATE TRIGGER tg_entry_append_only
+    BEFORE UPDATE OR DELETE ON entry
+    FOR EACH ROW EXECUTE FUNCTION append_only();

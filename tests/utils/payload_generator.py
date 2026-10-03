@@ -73,3 +73,31 @@ class PayloadGenerator:
         if reason is None:
             reason = f"Motivo do teste para {status}"
         return {"status": status, "reason": reason}
+
+    @staticmethod
+    def create_incoming_ted_payload(
+        account: dict, amount_cents: int = 30000, external_id: str = None, payer_bank_code: str = "001"
+    ) -> dict:
+        """O aviso que o Banco Central manda quando chega uma TED de outro banco.
+
+        `account` e a conta de destino como o GET /accounts devolve.
+        """
+        if external_id is None:
+            external_id = f"TED-{uuid4()}"
+
+        return {
+            "external_id": external_id,
+            "amount_cents": amount_cents,
+            "recipient": {
+                "branch": account["branch"],
+                "account_number": account["account_number"],
+                "check_digit": account["check_digit"],
+            },
+            "payer": {
+                "name": "Carlos Pereira",
+                "document": "52998224725",
+                "bank_code": payer_bank_code,
+                "branch": "1234",
+                "account_number": "0098765",
+            },
+        }

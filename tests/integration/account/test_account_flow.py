@@ -169,3 +169,17 @@ class TestAccountStatusChange:
         )
         assert status == 404
         assert response["code"] == "QIT003001"
+
+    def test_account_with_balance_cannot_be_closed(self):
+        account_key = create_account()
+        _, account = RequestGenerator.GET_account(account_key)
+        status, _ = RequestGenerator.POST_webhook_central_bank_ted(
+            PayloadGenerator.create_incoming_ted_payload(account, amount_cents=100)
+        )
+        assert status == 201
+
+        status, response = RequestGenerator.PATCH_account(
+            account_key, PayloadGenerator.create_account_status_payload("CLOSED")
+        )
+        assert status == 409
+        assert response["code"] == "QIT003004"
