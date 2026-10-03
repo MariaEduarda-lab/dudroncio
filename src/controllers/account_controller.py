@@ -2,11 +2,25 @@ from sqlalchemy.exc import IntegrityError
 
 from controllers.base_controller import BaseController
 from dtos import AccountDTO
-from errors import ClientAlreadyHasAccount, NotFoundAccount, NotFoundClient
+from errors import (
+    AccountWithBalanceCannotBeClosed,
+    ClientAlreadyHasAccount,
+    ForbiddenAccountStatusTransition,
+    NotFoundAccount,
+    NotFoundClient,
+)
+from models import Account
 from repositories import AccountRepository, ClientRepository
 from utils.account_number import account_check_digit, generate_account_number
 
 ACCOUNT_NUMBER_ATTEMPTS = 5
+
+# Para onde cada status pode ir pelo PATCH. CLOSED nao aparece como
+# origem: conta encerrada nao volta. CREATED so existe durante a abertura.
+ALLOWED_TRANSITIONS = {
+    Account.ACTIVE: {Account.BLOCKED, Account.CLOSED},
+    Account.BLOCKED: {Account.ACTIVE, Account.CLOSED},
+}
 
 
 class AccountController(BaseController):
@@ -45,6 +59,10 @@ class AccountController(BaseController):
                     raise ClientAlreadyHasAccount()
                 raise exception
 
+            # A conta nasce CREATED e e ativada na mesma transacao: quem
+            # consulta nunca a encontra pela metade.
+            self.account_repository.update_status(account, Account.ACTIVE, None)
+            self.session.flush()
             response = AccountDTO.only_key(account)
             self.session.commit()
             return response
@@ -56,3 +74,27 @@ class AccountController(BaseController):
         if account is None:
             raise NotFoundAccount(account_key)
         return AccountDTO.obj_to_dict(account)
+
+    def update_status(self, account_key: str, new_status: str, reason: str) -> dict:
+        account = self.account_repository.get_by_key_for_update(account_key)
+        if account is None:
+            raise NotFoundAccount(account_key)
+
+        # Repetir o status atual nao e uma transicao: devolve a conta como
+        # esta, sem gravar nada. E isso que torna o PATCH idempotente.
+        if account.status == new_status:
+            response = AccountDTO.obj_to_dict(account)
+            self.session.rollback()
+            return response
+
+        if new_status not in ALLOWED_TRANSITIONS.get(account.status, set()):
+            raise ForbiddenAccountStatusTransition(account.status, new_status)
+
+        if new_status == Account.CLOSED and account.balance_cents != 0:
+            raise AccountWithBalanceCannotBeClosed()
+
+        self.account_repository.update_status(account, new_status, reason)
+        self.session.flush()
+        response = AccountDTO.obj_to_dict(account)
+        self.session.commit()
+        return response

@@ -75,24 +75,28 @@ CREATE TABLE legal_representative(
 
 CREATE TABLE account(
     id                              BIGSERIAL PRIMARY KEY,
-    account_key                     CHAR(36) NOT NULL,
+    account_key                     UUID NOT NULL,
     client_id                       BIGINT NOT NULL REFERENCES client(id),
     branch                          CHAR(4) NOT NULL DEFAULT('0001'),
     account_number                  CHAR(8) NOT NULL,
     check_digit                     CHAR(1) NOT NULL,
     balance_cents                   BIGINT NOT NULL DEFAULT(0),
+    status                          VARCHAR(20) NOT NULL,
+    status_reason                   VARCHAR(255),
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
+    updated_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
     CONSTRAINT uq_account_key UNIQUE(account_key),
     CONSTRAINT uq_account_client UNIQUE(client_id),
     CONSTRAINT uq_account_number UNIQUE(branch, account_number),
     CONSTRAINT ck_account_number CHECK (account_number ~ '^[0-9]{8}$'),
     CONSTRAINT ck_account_check_digit CHECK (check_digit ~ '^[0-9]$'),
-    CONSTRAINT ck_account_balance CHECK (balance_cents >= 0)
+    CONSTRAINT ck_account_balance CHECK (balance_cents >= 0),
+    CONSTRAINT ck_account_status CHECK (status IN ('CREATED', 'ACTIVE', 'BLOCKED', 'CLOSED'))
 );
 
--- A conta nunca e apagada, e agencia, numero e digito nunca mudam: o
--- saldo e o unico campo que pode ser alterado (CON-05).
-CREATE FUNCTION account_only_balance_changes() RETURNS trigger
+-- A conta nunca e apagada, e agencia, numero e digito nunca mudam. So
+-- podem ser alterados o saldo e o status (com motivo e data da mudanca).
+CREATE FUNCTION account_protected_columns() RETURNS trigger
 LANGUAGE plpgsql AS $$
 BEGIN
     IF TG_OP = 'DELETE' THEN
@@ -102,13 +106,13 @@ BEGIN
     IF (NEW.id, NEW.account_key, NEW.client_id, NEW.branch, NEW.account_number, NEW.check_digit, NEW.created_at)
         IS DISTINCT FROM
        (OLD.id, OLD.account_key, OLD.client_id, OLD.branch, OLD.account_number, OLD.check_digit, OLD.created_at) THEN
-        RAISE EXCEPTION 'Na conta, so o saldo pode mudar' USING ERRCODE = 'restrict_violation';
+        RAISE EXCEPTION 'Na conta, so o saldo e o status podem mudar' USING ERRCODE = 'restrict_violation';
     END IF;
 
     RETURN NEW;
 END;
 $$;
 
-CREATE TRIGGER tg_account_only_balance_changes
+CREATE TRIGGER tg_account_protected_columns
     BEFORE UPDATE OR DELETE ON account
-    FOR EACH ROW EXECUTE FUNCTION account_only_balance_changes();
+    FOR EACH ROW EXECUTE FUNCTION account_protected_columns();

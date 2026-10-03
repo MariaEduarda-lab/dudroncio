@@ -48,6 +48,16 @@ class RequestGenerator:
         return response.response_status, response.response_json
 
     @staticmethod
+    def PATCH_account(account_key: str, account_payload: dict) -> BaseConnectorResponse:
+        response = ClientRequisition.send(
+            "PATCH",
+            f"/accounts/{account_key}",
+            payload=account_payload,
+            headers={"INTERNAL-TOKEN": INTERNAL_TOKEN},
+        )
+        return response.response_status, response.response_json
+
+    @staticmethod
     def POST_sample_entity(sample_entity_payload: dict) -> BaseConnectorResponse:
         response = ClientRequisition.send(
             "POST",

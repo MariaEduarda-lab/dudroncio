@@ -44,6 +44,12 @@ class PayloadGenerator:
         }
 
     @staticmethod
+    def create_account_status_payload(status: str, reason: str = None) -> dict:
+        if reason is None:
+            reason = f"Motivo do teste para {status}"
+        return {"status": status, "reason": reason}
+
+    @staticmethod
     def create_sample_entity_payload(
         hello: str = None,
         name: str = None,
