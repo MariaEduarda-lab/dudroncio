@@ -75,3 +75,42 @@ class TestClientFlow:
         status, response = RequestGenerator.GET_client("00000000-0000-0000-0000-000000000000")
         assert status == 404
         assert response["code"] == "QIT002001"
+
+    def test_refuses_cnpj_status_sent_by_client(self):
+        payload = PayloadGenerator.create_client_payload()
+        payload["cnpj_status"] = "ACTIVE"
+
+        status, response = RequestGenerator.POST_client(payload)
+        assert status == 400
+        assert response["code"] == "QIT000001"
+
+    def test_refuses_cnpj_ineligible_in_registry(self):
+        payload = PayloadGenerator.create_client_payload(cnpj="22.333.444/0001-81")
+
+        status, response = RequestGenerator.POST_client(payload)
+        assert status == 422
+        assert response["code"] == "QIT002008"
+
+    def test_invalid_cpf_error_does_not_expose_cpf(self):
+        payload = PayloadGenerator.create_client_payload()
+        payload["legal_representative"]["cpf"] = "111.111.111-11"
+
+        status, response = RequestGenerator.POST_client(payload)
+        assert status == 422
+        assert "11111111111" not in str(response)
+        assert "111.111.111-11" not in str(response)
+
+    def test_duplicated_cpf_error_does_not_expose_cpf(self):
+        first = PayloadGenerator.create_client_payload()
+        status, _ = RequestGenerator.POST_client(first)
+        assert status == 201
+
+        second = PayloadGenerator.create_client_payload()
+        second["legal_representative"]["cpf"] = first["legal_representative"]["cpf"]
+        status, response = RequestGenerator.POST_client(second)
+        assert status == 409
+        assert response["code"] == "QIT002006"
+
+        cpf = first["legal_representative"]["cpf"]
+        assert cpf not in str(response)
+        assert "".join(character for character in cpf if character.isdigit()) not in str(response)

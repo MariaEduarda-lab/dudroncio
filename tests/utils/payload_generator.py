@@ -18,7 +18,6 @@ class PayloadGenerator:
             "legal_name": "Empresa Exemplo Tecnologia Ltda",
             "trade_name": "Empresa Exemplo",
             "client_type": "PJ",
-            "cnpj_status": "ACTIVE",
             "primary_activity": "Desenvolvimento de software",
             "monthly_revenue_cents": 5000000,
             "email": email,

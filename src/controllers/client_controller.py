@@ -3,6 +3,7 @@ from datetime import date
 
 from sqlalchemy.exc import IntegrityError
 
+from connectors import CnpjRegistryConnector
 from controllers.base_controller import BaseController
 from dtos import ClientDTO
 from errors import (
@@ -24,6 +25,7 @@ class ClientController(BaseController):
     def __init__(self) -> None:
         super().__init__(__name__)
         self.client_repository = ClientRepository(self.context)
+        self.cnpj_registry_connector = CnpjRegistryConnector()
 
     def create(self, raw_client_data: dict) -> dict:
         client_data = self._normalize(raw_client_data)
@@ -33,10 +35,11 @@ class ClientController(BaseController):
             raise InvalidCnpj(raw_client_data["cnpj"])
 
         if not is_valid_cpf(representative["cpf"]):
-            raise InvalidRepresentativeCpf(raw_client_data["legal_representative"]["cpf"])
+            raise InvalidRepresentativeCpf()
 
         representative["birthdate"] = self._valid_adult_birthdate(representative["birthdate"])
 
+        client_data["cnpj_status"] = self.cnpj_registry_connector.get_cnpj_status(client_data["cnpj"])
         if client_data["cnpj_status"] != "ACTIVE":
             raise IneligibleCnpjStatus(client_data["cnpj_status"])
 
@@ -48,7 +51,7 @@ class ClientController(BaseController):
             self._check_email_is_available(representative["email"])
 
         if self.client_repository.get_representative_by_cpf(representative["cpf"]) is not None:
-            raise DuplicatedRepresentativeCpf(representative["cpf"])
+            raise DuplicatedRepresentativeCpf()
 
         password_hash = hash_password(representative.pop("password"))
         client = self.client_repository.create(client_data, password_hash)
@@ -73,7 +76,6 @@ class ClientController(BaseController):
         client_data = deepcopy(raw_client_data)
         client_data["cnpj"] = only_document_characters(client_data["cnpj"])
         client_data["email"] = client_data["email"].strip().lower()
-        client_data["cnpj_status"] = client_data["cnpj_status"].upper()
 
         representative = client_data["legal_representative"]
         representative["cpf"] = only_document_characters(representative["cpf"])
@@ -112,5 +114,5 @@ class ClientController(BaseController):
         if constraint_name == "uq_legal_representative_email":
             raise DuplicatedClientEmail(representative["email"])
         if constraint_name == "uq_legal_representative_cpf":
-            raise DuplicatedRepresentativeCpf(representative["cpf"])
+            raise DuplicatedRepresentativeCpf()
         raise exception

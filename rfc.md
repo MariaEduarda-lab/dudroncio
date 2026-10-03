@@ -18,7 +18,7 @@ O modelo inicialmente levantado pelo time foi: `Cliente(id, CNPJ, email, senha, 
 
 A proposta final mantém Cliente, Conta, Transação e Tarifa, acrescenta o representante legal da empresa e separa a operação financeira dos movimentos imutáveis que alteram uma conta. O saldo corrente fica em `account` para consulta rápida; cada débito, crédito, tarifa ou estorno fica em `account_movement`, permitindo reconstrução e conciliação. A mesma transação ACID trava a conta, grava os movimentos e atualiza o saldo. O extrato passa a ser uma consulta por período sobre esses movimentos, não uma entidade. A tarifa vira uma regra com vigência, e a transação guarda uma cópia do valor efetivamente cobrado.
 
-Para o projeto, os dados básicos da empresa são CNPJ, razão social, nome fantasia opcional, situação cadastral do CNPJ, atividade principal, faturamento mensal informado, contato e endereço. Também se identifica ao menos um representante legal com CPF, nome, nascimento, contato e função. Esta é uma modelagem acadêmica mínima, não uma lista universal de conformidade: a [Resolução CMN nº 4.753](https://normativos.bcb.gov.br/Lists/Normativos/Attachments/50847/Res_4753_v6_L.pdf) exige procedimentos para identificar e qualificar o titular e seus representantes, validar a autenticidade e conhecer perfil de risco/capacidade econômico-financeira; a Receita também disponibiliza situação cadastral e QSA na [consulta oficial do CNPJ](https://www.gov.br/pt-br/servicos/consultar-cadastro-nacional-de-pessoas-juridicas).
+Para o projeto, os dados básicos da empresa são CNPJ, razão social, nome fantasia opcional, situação cadastral do CNPJ (obtida por consulta à fonte cadastral, nunca enviada pelo cliente; no MVP, um connector simulado), atividade principal, faturamento mensal informado, contato e endereço. Também se identifica ao menos um representante legal com CPF, nome, nascimento, contato e função. Esta é uma modelagem acadêmica mínima, não uma lista universal de conformidade: a [Resolução CMN nº 4.753](https://normativos.bcb.gov.br/Lists/Normativos/Attachments/50847/Res_4753_v6_L.pdf) exige procedimentos para identificar e qualificar o titular e seus representantes, validar a autenticidade e conhecer perfil de risco/capacidade econômico-financeira; a Receita também disponibiliza situação cadastral e QSA na [consulta oficial do CNPJ](https://www.gov.br/pt-br/servicos/consultar-cadastro-nacional-de-pessoas-juridicas).
 
 Cliente e representante legal são dados cadastrais, não máquinas de estado. Nesta versão eles não recebem `status` nem tabela de histórico: existir uma linha significa que o cadastro foi aceito. O ciclo de vida operacional pertence à conta, que terá `status`, `status_reason`, `created_at` e `updated_at`. Encerrar uma conta altera seu estado para `CLOSED`; não apaga conta, cliente ou representante.
 
@@ -42,7 +42,7 @@ Os controles de identidade, autenticação, autorização, concorrência, antifr
 
 | Método | Caminho | O que faz | Entrada (campos que importam) | Saídas (status e quando) |
 |---|---|---|---|---|
-| `POST` | `/clients` | Cadastra cliente PJ e representante principal | dados da empresa; objeto `legal_representative` com CPF, nome, contato, função e senha | `201` com `client_key`; `400` corpo inválido; `422` CNPJ inválido; `409` CNPJ ou e-mail já cadastrado. Não é idempotente; unicidade impede duplicata, mas a repetição recebe conflito. |
+| `POST` | `/clients` | Cadastra cliente PJ e representante principal | dados da empresa; objeto `legal_representative` com CPF, nome, contato, função e senha | `201` com `client_key`; `400` corpo inválido ou com `cnpj_status`; `422` CNPJ inválido, CNPJ em situação cadastral inelegível, CPF inválido ou representante menor de idade; `409` CNPJ, e-mail ou CPF do representante já cadastrado. Não é idempotente; unicidade impede duplicata, mas a repetição recebe conflito. |
 | `GET` | `/clients/{client_key}` | Consulta cliente | UUID no caminho | `200`; `404` chave inexistente. Idempotente por ser somente leitura. |
 | `POST` | `/clients/{client_key}/accounts` | **Planejada:** abre conta para um cadastro existente | tipo da conta; `client_key` no caminho | `201` com `account_key`; `400` corpo inválido; `404` cliente inexistente; `409` cadastro inelegível ou cliente já possui a conta permitida. Não é idempotente nesta versão. |
 | `POST` | `/onboardings` | **Planejada:** executa a jornada principal de cliente, representante e conta em uma única transação | os mesmos dados cadastrais de `/clients` e o tipo da conta | `201` com `client_key` e `account_key`; qualquer falha reverte as três criações. Será a operação preferencial do futuro SDK. |
@@ -164,12 +164,12 @@ erDiagram
 **Cadastro de cliente — caminho feliz**
 
 1. O schema valida formato e campos obrigatórios; o domínio normaliza e valida CNPJ e e-mail.
-2. O serviço verifica as restrições únicas, a elegibilidade cadastral e transforma a senha do representante com Argon2id.
+2. O serviço verifica as restrições únicas, consulta a situação cadastral do CNPJ pelo connector (simulado no MVP) e transforma a senha do representante com Argon2id. A situação gravada é a devolvida pela consulta, nunca um valor enviado pelo cliente.
 3. Cliente e representante são criados na mesma transação e a resposta devolve `201` com `client_key`, nunca com status operacional, IDs internos, CPF completo ou `password_hash`.
 
 **Cadastro de cliente — falha: identidade repetida ou inválida**
 
-1. CNPJ inválido recebe `422`; CNPJ/e-mail que viola unicidade recebe `409`.
+1. CNPJ inválido, CNPJ em situação cadastral inelegível ou CPF inválido recebe `422`; CNPJ/e-mail/CPF que viola unicidade recebe `409`. Nenhuma mensagem de erro expõe o CPF completo.
 2. A operação é revertida por inteiro e a resposta usa o corpo padrão de erro (`title`, `description`, `translation`, `code`).
 
 **Abertura de conta — caminho feliz**

@@ -156,12 +156,12 @@ class DuplicatedClientEmail(QIException):
 class InvalidRepresentativeCpf(QIException):
     code = "QIT002005"
 
-    def __init__(self, cpf) -> None:
+    def __init__(self) -> None:
         super().__init__(
             "Invalid representative CPF",
             self.code,
             422,
-            f"The legal representative CPF {cpf} is invalid.",
+            "The legal representative CPF is invalid.",
             "O CPF do representante legal não é válido.",
         )
 
@@ -169,12 +169,12 @@ class InvalidRepresentativeCpf(QIException):
 class DuplicatedRepresentativeCpf(QIException):
     code = "QIT002006"
 
-    def __init__(self, cpf) -> None:
+    def __init__(self) -> None:
         super().__init__(
             "Representative CPF already registered",
             self.code,
             409,
-            f"There is already a legal representative with CPF {cpf}.",
+            "There is already a legal representative with this CPF.",
             "Já existe um representante legal cadastrado com este CPF.",
         )
 
@@ -200,6 +200,6 @@ class IneligibleCnpjStatus(QIException):
             "CNPJ status is not eligible",
             self.code,
             422,
-            f"A client with CNPJ status {cnpj_status} cannot be activated.",
-            "A situação cadastral do CNPJ não permite ativar o cliente.",
+            f"A client with CNPJ status {cnpj_status} cannot be registered.",
+            "A situação cadastral do CNPJ não permite o cadastro do cliente.",
         )

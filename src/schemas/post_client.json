@@ -20,10 +20,6 @@
       "type": "string",
       "enum": ["MEI", "PJ"]
     },
-    "cnpj_status": {
-      "type": "string",
-      "enum": ["ACTIVE", "SUSPENDED", "INAPT", "CLOSED", "NULL"]
-    },
     "primary_activity": {
       "type": "string",
       "minLength": 1,
@@ -84,7 +80,6 @@
     "cnpj",
     "legal_name",
     "client_type",
-    "cnpj_status",
     "primary_activity",
     "monthly_revenue_cents",
     "email",
