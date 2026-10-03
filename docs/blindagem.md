@@ -30,12 +30,12 @@ Nenhuma verificação isolada confirma “o CNPJ é meu”. A confiança vem da 
 6. Validar a identidade da pessoa física com documento e prova de vida/biometria por provedor autorizado. Uma alternativa de alta confiança para a empresa é desafio assinado com certificado ICP-Brasil/e-CNPJ.
 7. Confirmar separadamente e-mail e telefone com códigos únicos, aleatórios, de uso único, curta validade, limite de tentativas e armazenamento apenas do hash do código.
 8. Calcular o risco do onboarding: CNPJ recém-aberto, representante divergente, muitas tentativas, mesmo dispositivo em várias empresas, proxy suspeito ou contatos reutilizados elevam risco. O resultado é `APPROVED`, `REVIEW` ou `BLOCKED`, com motivos.
-9. Criar cliente e representante como `PENDING`. Somente após todas as etapas obrigatórias, promover para `ACTIVE` e permitir a abertura da conta.
+9. Criar cliente e representante somente após todas as validações cadastrais obrigatórias. Eles são cadastros, não máquinas de estado; `APPROVED`, `REVIEW` e `BLOCKED` pertencem à decisão do onboarding, e o estado operacional pertence à conta.
 10. Registrar quais fontes foram verificadas, resultado, versão da regra e horário. Evitar persistir imagem biométrica ou documento bruto quando basta guardar referência e resultado do provedor.
 
 ### 2.2 MVP e evolução
 
-**MVP do bootcamp:** algoritmo de CPF/CNPJ, consulta externa simulada por connector, confirmação de e-mail/telefone simulada, cruzamento de representante, estados `PENDING/ACTIVE/BLOCKED`, limite de tentativas e trilha de auditoria.
+**MVP do bootcamp:** algoritmo de CPF/CNPJ, consulta externa simulada por connector, confirmação de e-mail/telefone simulada, cruzamento de representante, decisão cadastral antes da persistência, limite de tentativas e trilha de auditoria. Quando a conta for implementada, seus estados serão `CREATED/ACTIVE/BLOCKED/CLOSED`; cliente e representante não terão status operacional.
 
 **Produção:** contrato com fonte oficial/autorizada, biometria com prova de vida, análise de procuração, e-CNPJ quando aplicável, política PLD/FT, privacidade/LGPD, revisão manual e monitoramento contínuo. A API pública do Conecta Gov tem público e condições de acesso específicos; não se deve presumir que qualquer empresa possa consumi-la diretamente.
 
@@ -57,7 +57,7 @@ Senha não deve ser criptografada de modo reversível. Deve ser derivada por fun
 5. Comparar hashes em tempo constante e reprocessar o hash no próximo login quando os parâmetros envelhecerem.
 6. Nunca registrar senha, OTP, token completo, chave PIX sensível ou payload biométrico em logs.
 
-Sessões devem ter access token curto, refresh token rotativo e revogável, `representative_id`, `client_id`, escopos, emissão e expiração. O refresh token persistido deve ser hasheado. Logout, troca de senha, bloqueio do representante ou suspeita de roubo revogam sessões ativas.
+Sessões devem ter access token curto, refresh token rotativo e revogável, `representative_id`, `client_id`, escopos, emissão e expiração. O refresh token persistido deve ser hasheado. Logout, troca de senha, decisão de segurança ou suspeita de roubo revogam sessões ativas sem exigir um status operacional no cadastro do representante.
 
 ## 4. Autorização: impedir acesso pela troca do ID
 
@@ -66,7 +66,7 @@ UUID reduz enumeração, mas não é controle de acesso. Toda rota de conta exec
 ```text
 representante autenticado
         ↓
-representante está ACTIVE?
+sessão está válida e não revogada?
         ↓
 representante.client_id == account.client_id?
         ↓
@@ -201,7 +201,7 @@ Limites devem existir por representante, conta e modalidade: quantidade por minu
 - falha entre débito, tarifa e crédito interno: rollback integral;
 - webhook repetido: um único crédito;
 - webhook sem autenticação ou fora da janela: recusado;
-- conta/representante bloqueado: nenhuma movimentação;
+- conta bloqueada ou sessão do representante revogada: nenhuma movimentação;
 - movimento original permanece após estorno; surge movimento inverso;
 - saldo da conta fecha com os movimentos após cada cenário;
 - senha, OTP, token e CPF completo não aparecem em logs ou DTOs.

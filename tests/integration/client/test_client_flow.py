@@ -7,7 +7,7 @@ class TestClientFlow:
         assert status == 400
         assert response["code"] == "QIT000001"
 
-    def test_creates_and_gets_active_client_without_sensitive_fields(self):
+    def test_creates_and_gets_client_without_operational_status_or_sensitive_fields(self):
         payload = PayloadGenerator.create_client_payload()
 
         status, response = RequestGenerator.POST_client(payload)
@@ -18,14 +18,15 @@ class TestClientFlow:
         assert status == 200
         assert client["cnpj"] == "".join(character for character in payload["cnpj"] if character.isalnum())
         assert client["legal_name"] == payload["legal_name"]
-        assert client["status"] == "ACTIVE"
-        assert [event["status"] for event in client["status_events"]] == ["PENDING", "ACTIVE"]
+        assert "status" not in client
+        assert "status_events" not in client
 
         representative = client["legal_representatives"][0]
         assert representative["cpf"].startswith("***.***.***-")
         assert representative["cpf"].endswith(payload["legal_representative"]["cpf"][-2:])
         assert "password" not in representative
         assert "password_hash" not in representative
+        assert "status" not in representative
         assert "id" not in representative
         assert "id" not in client
 

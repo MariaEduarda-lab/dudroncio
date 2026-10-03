@@ -3,4 +3,3 @@ from models.sample_entity import SampleEntity
 from models.sample_entity_status_event import SampleEntityStatusEvent
 from models.client import Client
 from models.legal_representative import LegalRepresentative
-from models.client_status_event import ClientStatusEvent

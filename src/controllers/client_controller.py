@@ -52,7 +52,6 @@ class ClientController(BaseController):
 
         password_hash = hash_password(representative.pop("password"))
         client = self.client_repository.create(client_data, password_hash)
-        self.client_repository.activate(client)
 
         try:
             self.session.flush()

@@ -1,8 +1,7 @@
-from datetime import datetime, timezone
 from uuid import uuid4
 
 from database import Context
-from models import Client, ClientStatusEvent, LegalRepresentative
+from models import Client, LegalRepresentative
 
 
 class ClientRepository:
@@ -24,7 +23,6 @@ class ClientRepository:
             email=client_data["email"],
             phone_number=client_data["phone_number"],
             address=dict(client_data["address"]),
-            status=Client.PENDING,
         )
 
         representative_data = client_data["legal_representative"]
@@ -37,33 +35,10 @@ class ClientRepository:
             phone_number=representative_data["phone_number"],
             role=representative_data["role"],
             password_hash=password_hash,
-            status=LegalRepresentative.ACTIVE,
         )
         client.legal_representatives.append(representative)
         self.session.add(client)
-        self.add_status_event(client, None, Client.PENDING, "Cadastro recebido")
         return client
-
-    def activate(self, client: Client) -> None:
-        previous_status = client.status
-        client.status = Client.ACTIVE
-        self.add_status_event(client, previous_status, Client.ACTIVE, "Politica cadastral aprovada")
-
-    def add_status_event(
-        self,
-        client: Client,
-        previous_status: str | None,
-        new_status: str,
-        reason: str,
-    ) -> None:
-        client.status_events.append(
-            ClientStatusEvent(
-                previous_status=previous_status,
-                new_status=new_status,
-                reason=reason,
-                event_datetime=datetime.now(timezone.utc),
-            )
-        )
 
     def get_by_key(self, client_key: str) -> Client | None:
         return self.session.query(Client).filter(Client.client_key == client_key).first()

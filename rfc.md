@@ -3,8 +3,8 @@
 | | |
 |---|---|
 | **Time** | <preencher nomes do time> |
-| **Data** | 27/09/2026 |
-| **Versão** | 3 — modelo PJ e blindagem transacional |
+| **Data** | 03/10/2026 |
+| **Versão** | 4 — cadastro sem estado e ciclo de vida na conta |
 
 ## Contextualização
 
@@ -20,7 +20,9 @@ A proposta final mantém Cliente, Conta, Transação e Tarifa, acrescenta o repr
 
 Para o projeto, os dados básicos da empresa são CNPJ, razão social, nome fantasia opcional, situação cadastral do CNPJ, atividade principal, faturamento mensal informado, contato e endereço. Também se identifica ao menos um representante legal com CPF, nome, nascimento, contato e função. Esta é uma modelagem acadêmica mínima, não uma lista universal de conformidade: a [Resolução CMN nº 4.753](https://normativos.bcb.gov.br/Lists/Normativos/Attachments/50847/Res_4753_v6_L.pdf) exige procedimentos para identificar e qualificar o titular e seus representantes, validar a autenticidade e conhecer perfil de risco/capacidade econômico-financeira; a Receita também disponibiliza situação cadastral e QSA na [consulta oficial do CNPJ](https://www.gov.br/pt-br/servicos/consultar-cadastro-nacional-de-pessoas-juridicas).
 
-`financial_transaction` representa a operação única e seu comprovante. `account_movement` representa cada efeito no saldo e cada linha do extrato: um PIX de R$ 100,00 com tarifa de R$ 2,00 produz uma transação, um movimento de débito de 10.000 centavos e outro de tarifa de 200 centavos. `account_status_history` não cria outra conta: conserva quando e por que a única conta daquele CNPJ mudou de estado. `transaction_risk_analysis` conserva a decisão antifraude e um motivo legível. Entidades expostas pela API têm `..._key`; tabelas internas de detalhe usam somente `id`.
+Cliente e representante legal são dados cadastrais, não máquinas de estado. Nesta versão eles não recebem `status` nem tabela de histórico: existir uma linha significa que o cadastro foi aceito. O ciclo de vida operacional pertence à conta, que terá `status`, `status_reason`, `created_at` e `updated_at`. Encerrar uma conta altera seu estado para `CLOSED`; não apaga conta, cliente ou representante.
+
+`financial_transaction` representa a operação única e seu comprovante. `account_movement` representa cada efeito no saldo e cada linha do extrato: um PIX de R$ 100,00 com tarifa de R$ 2,00 produz uma transação, um movimento de débito de 10.000 centavos e outro de tarifa de 200 centavos. Nesta fase, a situação atual e o motivo ficam na própria conta; uma tabela separada de histórico de status poderá ser introduzida quando houver requisito de auditoria dessa transição. `transaction_risk_analysis` conserva a decisão antifraude e um motivo legível. Entidades expostas pela API têm `..._key`; tabelas internas de detalhe usam somente `id`.
 
 **Como a entrega de extrato é atendida:** o extrato é a representação retornada por `GET /accounts/{account_key}/transactions`, não uma tabela adicional. A API recebe período e paginação, busca os `account_movement` daquela conta, associa cada movimento à sua `financial_transaction` e devolve saldo inicial, créditos, débitos, tarifas, estornos e saldo final. Não persistir uma cópia do extrato evita divergência quando uma transação é estornada. O índice `(account_id, created_at, id)` mantém a consulta eficiente e a ordenação estável.
 
@@ -42,7 +44,8 @@ Os controles de identidade, autenticação, autorização, concorrência, antifr
 |---|---|---|---|---|
 | `POST` | `/clients` | Cadastra cliente PJ e representante principal | dados da empresa; objeto `legal_representative` com CPF, nome, contato, função e senha | `201` com `client_key`; `400` corpo inválido; `422` CNPJ inválido; `409` CNPJ ou e-mail já cadastrado. Não é idempotente; unicidade impede duplicata, mas a repetição recebe conflito. |
 | `GET` | `/clients/{client_key}` | Consulta cliente | UUID no caminho | `200`; `404` chave inexistente. Idempotente por ser somente leitura. |
-| `POST` | `/clients/{client_key}/accounts` | Abre conta | tipo da conta; `client_key` no caminho | `201` com `account_key`; `400` corpo inválido; `404` cliente inexistente; `409` cliente bloqueado ou já possui a conta permitida. Não é idempotente nesta versão. |
+| `POST` | `/clients/{client_key}/accounts` | **Planejada:** abre conta para um cadastro existente | tipo da conta; `client_key` no caminho | `201` com `account_key`; `400` corpo inválido; `404` cliente inexistente; `409` cadastro inelegível ou cliente já possui a conta permitida. Não é idempotente nesta versão. |
+| `POST` | `/onboardings` | **Planejada:** executa a jornada principal de cliente, representante e conta em uma única transação | os mesmos dados cadastrais de `/clients` e o tipo da conta | `201` com `client_key` e `account_key`; qualquer falha reverte as três criações. Será a operação preferencial do futuro SDK. |
 | `GET` | `/accounts/{account_key}` | Consulta conta e saldo | UUID no caminho | `200`; `404` chave inexistente. Idempotente por ser somente leitura. |
 | `PATCH` | `/accounts/{account_key}` | Bloqueia, reativa ou encerra conta | `status`, `reason` | `200`; `400` corpo inválido; `404` conta inexistente; `409` transição de estado proibida. Idempotente quando repete o mesmo estado e motivo. |
 | `POST` | `/accounts/{account_key}/transactions` | Cria intenção PIX/TED com snapshot imutável | cabeçalho `Idempotency-Key`; `type`, `amount_cents`, identificador do destino | `201` em `AWAITING_AUTHORIZATION`; `200` ao repetir a mesma chave e corpo; `400` corpo/campo proibido; `404` conta inexistente/alheia; `409` chave reutilizada com outro corpo ou conta inativa; `422` destino, limite ou risco recusado. Idempotente por `(account_id, idempotency_key)`. |
@@ -59,7 +62,7 @@ Diagrama no formato pedido pela seção "Banco de Dados (Somente diagrama)" do R
 ```mermaid
 erDiagram
     CLIENTE ||--|{ REPRESENTANTE_LEGAL : "tem"
-    CLIENTE ||--|| CONTA : "possui"
+    CLIENTE ||--o| CONTA : "pode possuir"
     CONTA |o--o{ TRANSACAO : "origina"
     CONTA |o--o{ TRANSACAO : "recebe"
     REPRESENTANTE_LEGAL |o--o{ TRANSACAO : "solicita"
@@ -97,7 +100,10 @@ erDiagram
         char numero_conta UK "8 digitos aleatorios"
         char digito_verificador "modulo 11"
         bigint saldo_centavos "nunca negativo; unico campo que muda"
+        enum status "CREATED, ACTIVE, BLOCKED, CLOSED"
+        varchar status_reason "motivo do estado atual; opcional"
         timestamptz criado_em
+        timestamptz atualizado_em "muda com saldo ou status"
     }
 
     REGRA_TARIFA {
@@ -158,8 +164,8 @@ erDiagram
 **Cadastro de cliente — caminho feliz**
 
 1. O schema valida formato e campos obrigatórios; o domínio normaliza e valida CNPJ e e-mail.
-2. O serviço verifica as restrições únicas, transforma a senha do representante com algoritmo de hash adequado e cria cliente e representante em `PENDING`.
-3. A política cadastral aprova o cliente, registra `ACTIVE` e responde `201` com `client_key`, nunca com IDs internos, CPF completo ou `password_hash`.
+2. O serviço verifica as restrições únicas, a elegibilidade cadastral e transforma a senha do representante com Argon2id.
+3. Cliente e representante são criados na mesma transação e a resposta devolve `201` com `client_key`, nunca com status operacional, IDs internos, CPF completo ou `password_hash`.
 
 **Cadastro de cliente — falha: identidade repetida ou inválida**
 
@@ -168,14 +174,14 @@ erDiagram
 
 **Abertura de conta — caminho feliz**
 
-1. O serviço busca o cliente por `client_key`, confirma `ACTIVE` e verifica o limite de uma conta no MVP.
-2. Cria a conta com saldo zero e estado `CREATED`, grava a primeira linha do histórico de status e então a ativa.
-3. A transação confirma as duas gravações e responde `201` com `account_key`.
+1. O serviço busca o cliente e seu representante por `client_key`, revalida a elegibilidade cadastral e verifica o limite de uma conta no MVP.
+2. Cria a conta com saldo zero, `status = CREATED`, `created_at` e `updated_at`; ao concluir a abertura, atualiza a mesma linha para `ACTIVE` e registra o motivo do estado atual quando aplicável.
+3. A transação confirma a conta e responde `201` com `account_key`. Cliente e representante permanecem dados cadastrais sem status próprio.
 
 **Abertura de conta — falha: cliente inelegível**
 
-1. Cliente inexistente recebe `404`; cliente bloqueado ou com conta já aberta recebe `409`.
-2. Nenhuma conta nem evento parcial permanece no banco.
+1. Cliente inexistente recebe `404`; cadastro inelegível ou cliente com conta já aberta recebe `409`.
+2. Nenhuma conta parcial permanece no banco.
 
 **PIX/TED de saída — caminho feliz**
 
@@ -215,6 +221,21 @@ erDiagram
 
 1. Período invertido, excessivo ou paginação fora do contrato recebe `400`; conta inexistente recebe `404`.
 2. A leitura não altera estado e nunca depende de uma tabela de extrato previamente materializada.
+
+### Jornadas de usuário e futuro SDK
+
+As rotas de recurso continuam úteis para administração e evolução independente, mas o SDK será orientado às intenções principais do usuário. A primeira jornada planejada é `open_business_account`: validar os dados, criar cliente e representante, abrir a conta e devolver as duas chaves. Quando `/onboardings` for implementada, essa jornada será atômica no banco; até lá, somente o fluxo cadastral de `/clients` está implementado.
+
+| Jornada do SDK | Operação HTTP principal | Resultado esperado |
+|---|---|---|
+| `onboarding.open_business_account` | `POST /onboardings` | cliente, representante e conta criados juntos |
+| `accounts.get` | `GET /accounts/{account_key}` | dados da conta, saldo e estado atual |
+| `accounts.block` | `PATCH /accounts/{account_key}` | conta em `BLOCKED`, com motivo e `updated_at` novo |
+| `accounts.close` | `PATCH /accounts/{account_key}` | conta em `CLOSED`, sem exclusão física dos cadastros |
+| `pix.send` / `ted.send` | `POST /accounts/{account_key}/transactions` | intenção idempotente para autorização |
+| `statements.list` | `GET /accounts/{account_key}/transactions` | extrato paginado derivado dos lançamentos |
+
+Cada jornada deverá documentar pré-condições, payload, sequência, estados intermediários, idempotência, erros recuperáveis e próximo passo. Assim o SDK pode manter uma interface estável mesmo se a composição interna das rotas amadurecer.
 
 > ## Principal desafio
 >

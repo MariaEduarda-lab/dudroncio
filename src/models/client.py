@@ -20,7 +20,6 @@ class Client(Base):
     email = Column(String(255), nullable=False)
     phone_number = Column(String(16), nullable=False)
     address = Column(JSONB, nullable=False)
-    status = Column(String(20), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
@@ -34,13 +33,3 @@ class Client(Base):
         back_populates="client",
         order_by="asc(LegalRepresentative.id)",
     )
-    status_events = relationship(
-        "ClientStatusEvent",
-        back_populates="client",
-        order_by="asc(ClientStatusEvent.event_datetime)",
-    )
-
-    PENDING = "PENDING"
-    ACTIVE = "ACTIVE"
-    BLOCKED = "BLOCKED"
-

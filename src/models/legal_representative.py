@@ -17,7 +17,6 @@ class LegalRepresentative(Base):
     phone_number = Column(String(16), nullable=False)
     role = Column(String(100), nullable=False)
     password_hash = Column(String(255), nullable=False)
-    status = Column(String(20), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (
@@ -27,7 +26,3 @@ class LegalRepresentative(Base):
     )
 
     client = relationship("Client", back_populates="legal_representatives")
-
-    ACTIVE = "ACTIVE"
-    BLOCKED = "BLOCKED"
-

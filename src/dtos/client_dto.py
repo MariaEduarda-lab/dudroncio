@@ -24,20 +24,10 @@ class ClientDTO:
             "email": client.email,
             "phone_number": client.phone_number,
             "address": dict(client.address),
-            "status": client.status,
             "created_at": client.created_at.isoformat(),
             "legal_representatives": [
                 ClientDTO.representative_to_dict(representative)
                 for representative in client.legal_representatives
-            ],
-            "status_events": [
-                {
-                    "previous_status": event.previous_status,
-                    "status": event.new_status,
-                    "reason": event.reason,
-                    "event_datetime": event.event_datetime.isoformat(),
-                }
-                for event in client.status_events
             ],
         }
         return response
@@ -52,5 +42,4 @@ class ClientDTO:
             "email": representative.email,
             "phone_number": representative.phone_number,
             "role": representative.role,
-            "status": representative.status,
         }
