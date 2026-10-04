@@ -79,3 +79,44 @@ $$;
 CREATE TRIGGER tg_account_protected_columns
     BEFORE UPDATE OR DELETE ON account
     FOR EACH ROW EXECUTE FUNCTION account_protected_columns();
+
+-- Tabela de precos da tarifa (TAR-14). Um preco novo e uma linha nova com
+-- outro valid_from; a vigente e a de maior valid_from ate o instante do
+-- envio. So envios tem preco: recebimentos e PF sao gratis no codigo.
+CREATE TABLE fee_rule(
+    id                              BIGSERIAL PRIMARY KEY,
+    person_type                     VARCHAR(2) NOT NULL,
+    transaction_type                VARCHAR(20) NOT NULL,
+    free_monthly_quota              INTEGER NOT NULL,
+    fee_cents                       BIGINT NOT NULL,
+    valid_from                      TIMESTAMPTZ NOT NULL,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
+    CONSTRAINT uq_fee_rule UNIQUE(person_type, transaction_type, valid_from),
+    CONSTRAINT ck_fee_rule_person_type CHECK (person_type IN ('PF', 'PJ')),
+    CONSTRAINT ck_fee_rule_only_sends CHECK (transaction_type IN ('PIX_OUT', 'TED_OUT')),
+    CONSTRAINT ck_fee_rule_quota CHECK (free_monthly_quota >= 0),
+    CONSTRAINT ck_fee_rule_fee CHECK (fee_cents >= 0)
+);
+
+-- Uma regra de tarifa nunca e editada nem apagada: o que foi cobrado
+-- ontem precisa continuar explicavel hoje.
+CREATE FUNCTION fee_rule_append_only() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION 'Uma regra de tarifa nunca e editada nem apagada' USING ERRCODE = 'restrict_violation';
+END;
+$$;
+
+CREATE TRIGGER tg_fee_rule_append_only
+    BEFORE UPDATE OR DELETE ON fee_rule
+    FOR EACH ROW EXECUTE FUNCTION fee_rule_append_only();
+
+CREATE TRIGGER tg_fee_rule_no_truncate
+    BEFORE TRUNCATE ON fee_rule
+    FOR EACH STATEMENT EXECUTE FUNCTION fee_rule_append_only();
+
+-- Precos iniciais da PJ (05-tarifa.md), valendo desde o comeco de 2026 em
+-- Brasilia. PF nao tem linha: nunca paga (TAR-01).
+INSERT INTO fee_rule (person_type, transaction_type, free_monthly_quota, fee_cents, valid_from) VALUES
+    ('PJ', 'PIX_OUT', 20, 99, '2026-01-01 00:00:00-03'),
+    ('PJ', 'TED_OUT', 2, 499, '2026-01-01 00:00:00-03');
