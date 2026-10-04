@@ -1,5 +1,6 @@
 from copy import deepcopy
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.exc import IntegrityError
 
@@ -26,6 +27,11 @@ from utils.document_number import is_valid_cnpj, is_valid_cpf, only_document_cha
 from utils.password import hash_password
 
 ADULT_AGE = 18
+
+# A maioridade conta no calendario de Brasilia, e nao no do servidor (UTC):
+# entre 21h e meia-noite o UTC ja esta no dia seguinte, e quem faz 18 anos
+# "amanha" seria aceito hoje.
+BRAZIL_TIMEZONE = ZoneInfo("America/Sao_Paulo")
 
 EMAIL_CONSTRAINTS = {"pk_registered_email", "uq_client_email", "uq_legal_representative_email"}
 
@@ -139,7 +145,7 @@ class ClientController(BaseController):
         except ValueError:
             return None
 
-        today = date.today()
+        today = datetime.now(BRAZIL_TIMEZONE).date()
         age = today.year - birthdate.year
         if (today.month, today.day) < (birthdate.month, birthdate.day):
             age -= 1

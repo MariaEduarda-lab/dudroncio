@@ -1,4 +1,5 @@
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 
 from tests.utils import PayloadGenerator, RandomGenerator, RequestGenerator
 
@@ -13,7 +14,8 @@ def assert_does_not_expose(response: dict, document_number: str) -> None:
 
 
 def birthdate_years_ago(years: int, days_later: int = 0) -> str:
-    today = date.today()
+    # Mesmo calendario do servidor: a maioridade conta no dia de Brasilia.
+    today = datetime.now(ZoneInfo("America/Sao_Paulo")).date()
     try:
         birthdate = today.replace(year=today.year - years)
     except ValueError:
