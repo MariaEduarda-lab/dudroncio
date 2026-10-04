@@ -27,7 +27,7 @@ from utils.password import hash_password
 
 ADULT_AGE = 18
 
-EMAIL_CONSTRAINTS = {"uq_client_email", "uq_legal_representative_email"}
+EMAIL_CONSTRAINTS = {"pk_registered_email", "uq_client_email", "uq_legal_representative_email"}
 
 
 class ClientController(BaseController):

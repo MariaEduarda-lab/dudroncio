@@ -105,3 +105,72 @@ $$;
 CREATE TRIGGER tg_account_protected_columns
     BEFORE UPDATE OR DELETE ON account
     FOR EACH ROW EXECUTE FUNCTION account_protected_columns();
+
+
+-- CLI-06: um e-mail nao se repete em lugar nenhum do banco, nem entre
+-- clientes, nem entre representantes. UNIQUE so vale dentro de uma
+-- tabela, entao todo e-mail cadastrado tambem entra aqui, pelos triggers
+-- abaixo, na mesma transacao do cadastro. A chave primaria recusa o
+-- repetido; com dois cadastros simultaneos, o segundo espera o primeiro
+-- terminar e recebe o erro de unicidade (pk_registered_email).
+CREATE TABLE registered_email(
+    email                           VARCHAR(255) NOT NULL,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
+    CONSTRAINT pk_registered_email PRIMARY KEY(email)
+);
+
+CREATE FUNCTION register_email() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF TG_OP = 'UPDATE' THEN
+        IF NEW.email IS DISTINCT FROM OLD.email THEN
+            RAISE EXCEPTION 'O e-mail do cadastro nao muda nesta fase' USING ERRCODE = 'restrict_violation';
+        END IF;
+        RETURN NEW;
+    END IF;
+
+    INSERT INTO registered_email(email) VALUES (NEW.email);
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER tg_client_register_email
+    BEFORE INSERT OR UPDATE OF email ON client
+    FOR EACH ROW EXECUTE FUNCTION register_email();
+
+CREATE TRIGGER tg_legal_representative_register_email
+    BEFORE INSERT OR UPDATE OF email ON legal_representative
+    FOR EACH ROW EXECUTE FUNCTION register_email();
+
+-- So PJ tem representante legal; a PF e o proprio titular.
+CREATE FUNCTION legal_representative_only_for_pj() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM client WHERE id = NEW.client_id AND person_type = 'PJ') THEN
+        RAISE EXCEPTION 'Representante legal so existe para cliente PJ' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER tg_legal_representative_only_for_pj
+    BEFORE INSERT OR UPDATE OF client_id ON legal_representative
+    FOR EACH ROW EXECUTE FUNCTION legal_representative_only_for_pj();
+
+-- Toda PJ tem pelo menos um representante. A conferencia fica para o
+-- COMMIT, porque a empresa e o representante nascem na mesma transacao.
+CREATE FUNCTION pj_has_legal_representative() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    IF NEW.person_type = 'PJ'
+        AND NOT EXISTS (SELECT 1 FROM legal_representative WHERE client_id = NEW.id) THEN
+        RAISE EXCEPTION 'Cliente PJ precisa de pelo menos um representante legal' USING ERRCODE = 'check_violation';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+CREATE CONSTRAINT TRIGGER tg_pj_has_legal_representative
+    AFTER INSERT ON client
+    DEFERRABLE INITIALLY DEFERRED
+    FOR EACH ROW EXECUTE FUNCTION pj_has_legal_representative();
