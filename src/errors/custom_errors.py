@@ -194,3 +194,16 @@ class InvalidBirthdate(QIException):
             f"The birthdate {birthdate} is invalid or underage.",
             "A data de nascimento é inválida ou a pessoa é menor de idade.",
         )
+
+
+class MissingFeeRule(QIException):
+    code = "QIT005001"
+
+    def __init__(self, person_type, transaction_type) -> None:
+        super().__init__(
+            "Fee rule not found",
+            self.code,
+            500,
+            f"There is no fee rule in force for {person_type} {transaction_type}.",
+            "Não há tarifa vigente para esta operação.",
+        )
