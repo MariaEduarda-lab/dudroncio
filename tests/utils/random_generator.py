@@ -1,4 +1,5 @@
 import random
+import string
 
 
 class RandomGenerator:
@@ -28,3 +29,16 @@ class RandomGenerator:
         )
 
         return cnpj_number
+
+    @staticmethod
+    def generate_alphanumeric_cnpj():
+        """CNPJ alfanumerico valido, sem mascara: letras valem o codigo ASCII menos 48."""
+        base = [random.choice(string.digits + string.ascii_uppercase) for _ in range(8)] + list("0001")
+        if not any(character.isalpha() for character in base):
+            return RandomGenerator.generate_alphanumeric_cnpj()
+
+        values = [ord(character) - 48 for character in base]
+        for weights in ([5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2], [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]):
+            remainder = sum(value * weight for value, weight in zip(values, weights)) % 11
+            values.append(0 if remainder < 2 else 11 - remainder)
+        return "".join(base) + "".join(str(digit) for digit in values[12:])

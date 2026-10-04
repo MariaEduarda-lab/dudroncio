@@ -215,3 +215,103 @@ CREATE TRIGGER tg_fee_rule_no_truncate
 INSERT INTO fee_rule (person_type, transaction_type, free_monthly_quota, fee_cents, valid_from) VALUES
     ('PJ', 'PIX_OUT', 20, 99, '2026-01-01 00:00:00-03'),
     ('PJ', 'TED_OUT', 2, 499, '2026-01-01 00:00:00-03');
+
+-- Todo movimento de dinheiro: recebimentos (TED_IN, PIX_IN), avisados pelo
+-- Banco Central, e envios (PIX_OUT, TED_OUT). Nesta etapa os envios sao so
+-- entre contas do nosso banco; o envio para outro banco entra depois.
+CREATE TABLE transaction(
+    id                              BIGSERIAL PRIMARY KEY,
+    transaction_key                 UUID NOT NULL,
+    type                            VARCHAR(20) NOT NULL,
+    amount_cents                    BIGINT NOT NULL,
+    fee_cents                       BIGINT NOT NULL DEFAULT(0),
+    -- Regra de preco usada no envio (TAR-13). Nula quando nao ha regra (PF).
+    fee_rule_id                     BIGINT REFERENCES fee_rule(id),
+    source_account_id               BIGINT REFERENCES account(id),
+    destination_account_id          BIGINT REFERENCES account(id),
+    -- Chave de idempotencia do envio e a impressao digital do pedido.
+    idempotency_key                 VARCHAR(64),
+    request_hash                    CHAR(64),
+    -- Identificacao dada pelo banco de origem a um recebimento.
+    external_id                     VARCHAR(64),
+    counterparty_name               VARCHAR(255) NOT NULL,
+    counterparty_document           VARCHAR(14) NOT NULL,
+    counterparty_bank_code          CHAR(3) NOT NULL,
+    counterparty_branch             VARCHAR(4) NOT NULL,
+    counterparty_account_number     VARCHAR(20) NOT NULL,
+    -- Chave Pix pela qual o recebimento chegou, ja normalizada.
+    pix_key                         VARCHAR(255),
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
+    CONSTRAINT uq_transaction_key UNIQUE(transaction_key),
+    CONSTRAINT ck_transaction_type CHECK (type IN ('TED_IN', 'PIX_IN', 'PIX_OUT', 'TED_OUT')),
+    CONSTRAINT ck_transaction_amount CHECK (amount_cents BETWEEN 1 AND 100000000000),
+    CONSTRAINT ck_transaction_fee CHECK (fee_cents >= 0),
+    CONSTRAINT ck_transaction_incoming CHECK (
+        type NOT IN ('TED_IN', 'PIX_IN')
+        OR (
+            destination_account_id IS NOT NULL AND external_id IS NOT NULL AND fee_cents = 0
+            AND source_account_id IS NULL AND idempotency_key IS NULL AND request_hash IS NULL
+        )
+    ),
+    CONSTRAINT ck_transaction_outgoing CHECK (
+        type NOT IN ('PIX_OUT', 'TED_OUT')
+        OR (source_account_id IS NOT NULL AND idempotency_key IS NOT NULL AND request_hash IS NOT NULL AND external_id IS NULL)
+    ),
+    -- Tarifa cobrada sempre aponta a regra de preco que a definiu.
+    CONSTRAINT ck_transaction_fee_rule CHECK (fee_cents = 0 OR fee_rule_id IS NOT NULL),
+    CONSTRAINT ck_transaction_not_to_itself CHECK (source_account_id IS DISTINCT FROM destination_account_id),
+    CONSTRAINT ck_transaction_pix_key CHECK ((type IN ('PIX_IN', 'PIX_OUT')) = (pix_key IS NOT NULL)),
+    -- Um pedido de envio por chave de idempotencia em cada conta de origem.
+    CONSTRAINT uq_transaction_idempotency UNIQUE(source_account_id, idempotency_key),
+    CONSTRAINT ck_transaction_document CHECK (counterparty_document ~ '^([0-9]{11}|[A-Z0-9]{12}[0-9]{2})$')
+);
+
+-- O mesmo aviso de recebimento, chegando de novo, nao credita duas vezes.
+-- A identificacao e unica por banco de origem: dois bancos podem usar o
+-- mesmo texto sem um apagar o recebimento do outro.
+CREATE UNIQUE INDEX ux_transaction_incoming_ref
+    ON transaction (type, counterparty_bank_code, external_id)
+    WHERE type IN ('TED_IN', 'PIX_IN');
+
+-- Contagem da cota de tarifa: envios de um tipo, de uma conta, no mes.
+CREATE INDEX ix_transaction_sends
+    ON transaction (source_account_id, type, created_at)
+    WHERE source_account_id IS NOT NULL;
+
+-- Um lancamento por mudanca de saldo: credito positivo, debito negativo.
+-- A soma dos lancamentos de uma conta e o saldo dela.
+CREATE TABLE entry(
+    id                              BIGSERIAL PRIMARY KEY,
+    entry_key                       UUID NOT NULL,
+    account_id                      BIGINT NOT NULL REFERENCES account(id),
+    transaction_id                  BIGINT NOT NULL REFERENCES transaction(id),
+    entry_type                      VARCHAR(10) NOT NULL,
+    amount_cents                    BIGINT NOT NULL,
+    balance_after_cents             BIGINT NOT NULL,
+    created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
+    CONSTRAINT uq_entry_key UNIQUE(entry_key),
+    CONSTRAINT ck_entry_type CHECK (entry_type IN ('VALUE', 'FEE')),
+    CONSTRAINT ck_entry_amount CHECK (amount_cents <> 0),
+    CONSTRAINT ck_entry_balance_after CHECK (balance_after_cents >= 0)
+);
+
+-- Transacoes e lancamentos nunca sao editados nem apagados.
+-- A mensagem e montada no USING, sem o sinal de porcentagem: o
+-- tests/utils/db_utils.py roda este arquivo pelo psycopg2, que leria esse
+-- sinal como parametro (em qualquer lugar do arquivo, ate em comentario).
+CREATE FUNCTION append_only() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    RAISE EXCEPTION USING
+        MESSAGE = 'A tabela ' || TG_TABLE_NAME || ' so aceita INSERT',
+        ERRCODE = 'restrict_violation';
+END;
+$$;
+
+CREATE TRIGGER tg_transaction_append_only
+    BEFORE UPDATE OR DELETE ON transaction
+    FOR EACH ROW EXECUTE FUNCTION append_only();
+
+CREATE TRIGGER tg_entry_append_only
+    BEFORE UPDATE OR DELETE ON entry
+    FOR EACH ROW EXECUTE FUNCTION append_only();

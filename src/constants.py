@@ -51,3 +51,14 @@ def check_variables():
             "Rodando com 'docker compose up' elas já vêm preenchidas. "
             "Fora do Docker, copie o .env.example para .env."
         )
+
+# Codigo do nosso banco nas TEDs. Uma TED com este codigo e para um cliente
+# nosso e e liquidada aqui dentro, sem passar pelo Banco Central.
+OUR_BANK_CODE = "999"
+
+# O Banco Central fake: quem confirma ou recusa os envios para outro banco.
+# O envio espera a resposta no maximo CENTRAL_BANK_API_TIMEOUT segundos;
+# sem resposta, o pedido e recusado (TRA-18).
+CENTRAL_BANK_API_URL = os.environ.get("CENTRAL_BANK_API_URL", "http://localhost:1080")
+CENTRAL_BANK_API_INTERNAL_TOKEN = os.environ.get("CENTRAL_BANK_API_INTERNAL_TOKEN", "default_token")
+CENTRAL_BANK_API_TIMEOUT = int(os.environ.get("CENTRAL_BANK_API_TIMEOUT", "5"))

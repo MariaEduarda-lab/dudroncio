@@ -42,6 +42,12 @@ services:
       BANKSLIP_API_URL: ${BANKSLIP_API_URL:-http://localhost:8080}
       BANKSLIP_API_INTERNAL_TOKEN: ${BANKSLIP_API_INTERNAL_TOKEN:-default_token}
       BANKSLIP_API_TIMEOUT: ${BANKSLIP_API_TIMEOUT:-5}
+      # O Banco Central fake (Mockserver, servico logo abaixo). Dentro do
+      # compose ele atende pelo nome "mockserver". O timeout e quanto o
+      # envio para outro banco espera pela resposta antes de recusar.
+      CENTRAL_BANK_API_URL: http://mockserver:1080
+      CENTRAL_BANK_API_INTERNAL_TOKEN: ${CENTRAL_BANK_API_INTERNAL_TOKEN:-default_token}
+      CENTRAL_BANK_API_TIMEOUT: ${CENTRAL_BANK_API_TIMEOUT:-5}
     volumes:
       # Monta o codigo pra dentro do container: salvou o arquivo,
       # a API recarrega sozinha (o --reload ali embaixo).
@@ -61,6 +67,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      mockserver:
+        condition: service_started
 
   db:
     build: ./database/.
@@ -78,3 +86,10 @@ services:
       timeout: 3s
       retries: 20
 
+  # Banco Central fake. Os testes dizem a ele como responder a cada envio
+  # (confirmar, recusar, demorar) pela API do proprio Mockserver, nesta
+  # porta. Se a 1080 estiver ocupada, MOCKSERVER_PORT=1081 no .env.
+  mockserver:
+    image: mockserver/mockserver:5.15.0
+    ports:
+      - "${MOCKSERVER_PORT:-1080}:1080"
