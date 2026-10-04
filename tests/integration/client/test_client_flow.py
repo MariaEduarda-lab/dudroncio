@@ -392,3 +392,21 @@ class TestPfClient:
         status, response = RequestGenerator.POST_client(payload)
         assert status == 400
         assert response["code"] == "QIT000001"
+
+    def test_bad_request_does_not_echo_document_or_password(self):
+        payload = PayloadGenerator.create_pf_client_payload()
+        payload["password"] = "senha-secreta-do-teste"
+        payload["legal_name"] = "Empresa Ltda"
+
+        status, response = RequestGenerator.POST_client(payload)
+        assert status == 400
+        assert response["code"] == "QIT000001"
+        assert "legal_name" in response["description"]
+        assert payload["password"] not in str(response)
+        assert_does_not_expose(response, payload["document_number"])
+
+        payload = PayloadGenerator.create_pf_client_payload(cpf="529.982.247")
+        status, response = RequestGenerator.POST_client(payload)
+        assert status == 400
+        assert "document_number" in response["description"]
+        assert "529.982.247" not in str(response)
