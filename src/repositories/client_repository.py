@@ -1,4 +1,6 @@
-from uuid import uuid4
+from uuid import UUID, uuid4
+
+from sqlalchemy.orm import selectinload
 
 from database import Context
 from models import Client, LegalRepresentative
@@ -10,41 +12,54 @@ class ClientRepository:
     def __init__(self, context: Context) -> None:
         self.session = context.db_session
 
-    def create(self, client_data: dict, password_hash: str) -> Client:
-        client = Client(
-            client_key=str(uuid4()),
-            cnpj=client_data["cnpj"],
-            legal_name=client_data["legal_name"],
-            trade_name=client_data.get("trade_name"),
-            client_type=client_data["client_type"],
-            cnpj_status=client_data["cnpj_status"],
-            primary_activity=client_data["primary_activity"],
-            monthly_revenue_cents=client_data["monthly_revenue_cents"],
-            email=client_data["email"],
-            phone_number=client_data["phone_number"],
-            address=dict(client_data["address"]),
-        )
+    def create_person(self, client_data: dict, password_hash: str) -> Client:
+        client = self._new_client(client_data, Client.PF)
+        client.full_name = client_data["full_name"]
+        client.birthdate = client_data["birthdate"]
+        client.password_hash = password_hash
+        self.session.add(client)
+        return client
+
+    def create_company(self, client_data: dict, representative_password_hash: str) -> Client:
+        client = self._new_client(client_data, Client.PJ)
+        client.legal_name = client_data["legal_name"]
+        client.trade_name = client_data.get("trade_name")
+        client.cnpj_status = client_data["cnpj_status"]
+        client.primary_activity = client_data["primary_activity"]
 
         representative_data = client_data["legal_representative"]
         representative = LegalRepresentative(
-            representative_key=str(uuid4()),
+            representative_key=uuid4(),
             cpf=representative_data["cpf"],
             full_name=representative_data["full_name"],
             birthdate=representative_data["birthdate"],
             email=representative_data["email"],
             phone_number=representative_data["phone_number"],
             role=representative_data["role"],
-            password_hash=password_hash,
+            password_hash=representative_password_hash,
         )
         client.legal_representatives.append(representative)
         self.session.add(client)
         return client
 
     def get_by_key(self, client_key: str) -> Client | None:
-        return self.session.query(Client).filter(Client.client_key == client_key).first()
+        # Chave em formato invalido nao existe: vira "nao encontrado", e nao
+        # um erro do banco ao comparar texto com UUID.
+        try:
+            parsed_key = UUID(client_key)
+        except ValueError:
+            return None
 
-    def get_by_cnpj(self, cnpj: str) -> Client | None:
-        return self.session.query(Client).filter(Client.cnpj == cnpj).first()
+        # Os representantes vem na mesma ida ao banco: o DTO nao consulta nada.
+        return (
+            self.session.query(Client)
+            .options(selectinload(Client.legal_representatives))
+            .filter(Client.client_key == parsed_key)
+            .first()
+        )
+
+    def get_by_document(self, document_number: str) -> Client | None:
+        return self.session.query(Client).filter(Client.document_number == document_number).first()
 
     def get_by_email(self, email: str) -> Client | None:
         return self.session.query(Client).filter(Client.email == email).first()
@@ -54,3 +69,14 @@ class ClientRepository:
 
     def get_representative_by_cpf(self, cpf: str) -> LegalRepresentative | None:
         return self.session.query(LegalRepresentative).filter(LegalRepresentative.cpf == cpf).first()
+
+    def _new_client(self, client_data: dict, person_type: str) -> Client:
+        return Client(
+            client_key=uuid4(),
+            person_type=person_type,
+            document_number=client_data["document_number"],
+            monthly_income_cents=client_data["monthly_income_cents"],
+            email=client_data["email"],
+            phone_number=client_data["phone_number"],
+            address=dict(client_data["address"]),
+        )

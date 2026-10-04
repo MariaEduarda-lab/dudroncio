@@ -81,16 +81,16 @@ class SchemaHandler:
 
         Usa-se assim, no método do resource que recebe corpo:
 
-            class SampleEntityResource:
-                @SchemaHandler.validate("post_sample_entity.json")
-                def on_post(self, payload: dict) -> dict:
+            class ClientResource:
+                @SchemaHandler.validate("post_client.json")
+                def on_post(self, payload: dict) -> JSONResponse:
 
         O nome do arquivo é o único argumento, e ele aponta pra dentro
         de src/schemas/. Método que não recebe corpo — um GET, um
         DELETE — não leva decorator nenhum: não há o que conferir.
 
         Repare que o endereço HTTP não aparece aqui. Quem liga
-        "/sample_entity" a este método é o src/app.py, e é de propósito:
+        "/clients" a este método é o src/app.py, e é de propósito:
         o resource cuida do CONTEÚDO da requisição, o app.py cuida do
         ENDEREÇO dela.
         """
@@ -124,8 +124,8 @@ class SchemaHandler:
 
         Usa-se assim, num metodo que recebe a requisicao inteira:
 
-            class SampleEntityResource:
-                @SchemaHandler.validate_query_params("get_sample_entities.json")
+            class ExemploResource:
+                @SchemaHandler.validate_query_params("get_exemplos.json")
                 def on_get_list(self, request: Request) -> JSONResponse:
 
         Por que ler do `request` em vez dos argumentos da funcao: o
@@ -201,7 +201,18 @@ def describe_schema_error(error: ValidationError) -> str:
     for part in error.absolute_path:
         location.append(str(part))
 
-    if location:
-        return f"{error.message} in {'.'.join(location)}"
+    message = error.message
+    # A mensagem do jsonschema costuma repetir o VALOR recebido ("'123' does
+    # not match ..."). Ele pode ser uma senha ou um CPF, que nao podem
+    # voltar na resposta. So "required" e "additionalProperties" falam
+    # apenas de nomes de campos; nos outros casos, diz-se a regra, nao o valor.
+    if error.validator not in VALIDATORS_WITHOUT_VALUES:
+        message = f"Invalid value ({error.validator})"
 
-    return error.message
+    if location:
+        return f"{message} in {'.'.join(location)}"
+
+    return message
+
+
+VALIDATORS_WITHOUT_VALUES = {"required", "additionalProperties"}

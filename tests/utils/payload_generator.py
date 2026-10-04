@@ -6,6 +6,7 @@ from tests.utils.random_generator import RandomGenerator
 class PayloadGenerator:
     @staticmethod
     def create_client_payload(cnpj: str = None, email: str = None, representative_email: str = None) -> dict:
+        """Cadastro PJ valido; o representante tem CPF e e-mail novos."""
         if cnpj is None:
             cnpj = RandomGenerator.generate_cnpj()
         if email is None:
@@ -14,24 +15,15 @@ class PayloadGenerator:
             representative_email = f"representante.{uuid4()}@exemplo.com.br"
 
         return {
-            "cnpj": cnpj,
+            "person_type": "PJ",
+            "document_number": cnpj,
             "legal_name": "Empresa Exemplo Tecnologia Ltda",
             "trade_name": "Empresa Exemplo",
-            "client_type": "PJ",
             "primary_activity": "Desenvolvimento de software",
-            "monthly_revenue_cents": 5000000,
+            "monthly_income_cents": 5000000,
             "email": email,
             "phone_number": "+5511999999999",
-            "address": {
-                "street": "Avenida Paulista",
-                "number": "1000",
-                "complement": "10 andar",
-                "neighborhood": "Bela Vista",
-                "city": "Sao Paulo",
-                "state": "SP",
-                "postal_code": "01310100",
-                "country": "BR",
-            },
+            "address": PayloadGenerator.create_address_payload(),
             "legal_representative": {
                 "cpf": RandomGenerator.generate_cpf(),
                 "full_name": "Maria da Silva",
@@ -44,45 +36,40 @@ class PayloadGenerator:
         }
 
     @staticmethod
-    def create_sample_entity_payload(
-        hello: str = None,
-        name: str = None,
-        email: str = None,
-        document_number: str = None,
-        birthdate: str = None,
-    ) -> dict:
-        """Um cadastro valido, com qualquer campo trocado a pedido.
-
-        Sem argumento nenhum o payload sai aleatorio no que precisa ser
-        unico (e-mail e CPF), pra que dois cadastros seguidos nao batam
-        na regra de duplicidade. Quem testa FILTRO precisa do contrario
-        disso: um valor conhecido, pra poder procurar por ele depois.
-        """
-        if hello is None:
-            hello = "world"
-
-        if name is None:
-            name = "Maria da Silva"
-
+    def create_pf_client_payload(cpf: str = None, email: str = None) -> dict:
+        """Cadastro PF valido, de uma pessoa maior de idade."""
+        if cpf is None:
+            cpf = RandomGenerator.generate_cpf()
         if email is None:
-            email = f"maria.silva.{uuid4()}@exemplo.com.br"
+            email = f"pessoa.{uuid4()}@exemplo.com.br"
 
-        if document_number is None:
-            document_number = RandomGenerator.generate_cpf()
-
-        if birthdate is None:
-            birthdate = "1990-05-17"
-
-        payload = {
-            "hello": hello,
-            "name": name,
+        return {
+            "person_type": "PF",
+            "document_number": cpf,
+            "full_name": "Ana Souza",
+            "birthdate": "1995-08-21",
+            "password": "senha-forte-123",
+            "monthly_income_cents": 750000,
             "email": email,
-            "document_number": document_number,
-            "birthdate": birthdate,
+            "phone_number": "+5511977777777",
+            "address": PayloadGenerator.create_address_payload(),
         }
-        return payload
 
     @staticmethod
-    def create_new_status_payload(new_status: str = None) -> dict:
-        payload = {"status": new_status}
-        return payload
+    def create_address_payload() -> dict:
+        return {
+            "street": "Avenida Paulista",
+            "number": "1000",
+            "complement": "10 andar",
+            "neighborhood": "Bela Vista",
+            "city": "Sao Paulo",
+            "state": "SP",
+            "postal_code": "01310100",
+            "country": "BR",
+        }
+
+    @staticmethod
+    def create_account_status_payload(status: str, reason: str = None) -> dict:
+        if reason is None:
+            reason = f"Motivo do teste para {status}"
+        return {"status": status, "reason": reason}

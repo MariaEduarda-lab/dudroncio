@@ -1,4 +1,5 @@
 from sqlalchemy import BigInteger, CHAR, Column, Date, DateTime, ForeignKey, String, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
 from models.base import Base
@@ -8,7 +9,7 @@ class LegalRepresentative(Base):
     __tablename__ = "legal_representative"
 
     id = Column(BigInteger, primary_key=True)
-    representative_key = Column(CHAR(36), nullable=False)
+    representative_key = Column(UUID(as_uuid=True), nullable=False)
     client_id = Column(BigInteger, ForeignKey("client.id"), nullable=False)
     cpf = Column(CHAR(11), nullable=False)
     full_name = Column(String(255), nullable=False)
