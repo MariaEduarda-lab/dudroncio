@@ -99,3 +99,13 @@ def is_valid_cnpj(document_number: str) -> bool:
         values.append(expected_digit)
 
     return True
+
+
+def masked_document(document_number: str) -> str:
+    """Documento para mostrar a outra pessoa: o CPF sai mascarado, o CNPJ inteiro.
+
+    O CPF e dado pessoal; o CNPJ e publico (consta na Receita).
+    """
+    if len(document_number) == CPF_LENGTH:
+        return f"***.***.***-{document_number[-2:]}"
+    return document_number

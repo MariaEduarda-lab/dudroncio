@@ -51,3 +51,7 @@ def check_variables():
             "Rodando com 'docker compose up' elas já vêm preenchidas. "
             "Fora do Docker, copie o .env.example para .env."
         )
+
+# Codigo do nosso banco nas TEDs. Uma TED com este codigo e para um cliente
+# nosso e e liquidada aqui dentro, sem passar pelo Banco Central.
+OUR_BANK_CODE = "999"

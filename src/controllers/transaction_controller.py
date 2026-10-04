@@ -1,9 +1,28 @@
+import hashlib
+import json
+import re
+from datetime import datetime, timezone
+
+from constants import OUR_BANK_CODE
 from controllers.base_controller import BaseController
 from dtos import TransactionDTO
-from errors import AccountNotActive, NotFoundPixKey, NotFoundRecipientAccount, ReusedTransactionReference
-from models import Account, Entry, Transaction
-from repositories import AccountRepository, ClientRepository, TransactionRepository
+from errors import (
+    AccountNotActive,
+    InsufficientBalance,
+    InvalidIdempotencyKey,
+    NotFoundAccount,
+    NotFoundPixKey,
+    NotFoundRecipientAccount,
+    ReusedTransactionReference,
+    TransferToSameAccount,
+)
+from models import Account, Client, Entry, Transaction
+from repositories import AccountRepository, ClientRepository, FeeRepository, TransactionRepository
+from utils.fee import calculate_fee_cents, month_start_brt
 from utils.pix_key import normalize_pix_key
+
+IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
+SEND_TYPES = {"PIX": Transaction.PIX_OUT, "TED": Transaction.TED_OUT}
 
 
 class TransactionController(BaseController):
@@ -11,7 +30,94 @@ class TransactionController(BaseController):
         super().__init__(__name__)
         self.account_repository = AccountRepository(self.context)
         self.client_repository = ClientRepository(self.context)
+        self.fee_repository = FeeRepository(self.context)
         self.transaction_repository = TransactionRepository(self.context)
+
+    def send(self, account_key: str, send_data: dict, idempotency_key: str | None) -> tuple[dict, bool]:
+        """Envia Pix ou TED de uma conta nossa para outra conta nossa.
+
+        Devolve a transacao e se ela foi criada agora. Tudo acontece numa
+        transacao so do banco de dados: contas travadas na ordem do id,
+        cota contada com a conta travada, chave de idempotencia reservada
+        antes do debito, debito atomico, credito e lancamentos. Qualquer
+        recusa desfaz tudo e deixa a chave livre para uma nova tentativa.
+        """
+        if idempotency_key is None or not IDEMPOTENCY_KEY_PATTERN.match(idempotency_key):
+            raise InvalidIdempotencyKey()
+
+        source = self.account_repository.get_by_key(account_key)
+        if source is None:
+            raise NotFoundAccount(account_key)
+
+        transaction_type = SEND_TYPES[send_data["type"]]
+        request = self._normalized_send(send_data)
+        request_hash = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
+
+        # Pedido repetido devolve a transacao que ja existe, mesmo que o
+        # destino tenha mudado de estado depois (TRA-12).
+        existing = self.transaction_repository.get_by_idempotency_key(source.id, idempotency_key)
+        if existing is not None:
+            return self._repeated_send(existing, request_hash)
+
+        destination = self._find_destination(request)
+        if destination.id == source.id:
+            raise TransferToSameAccount()
+
+        self.account_repository.lock_by_ids([source.id, destination.id])
+        if source.status != Account.ACTIVE or destination.status != Account.ACTIVE:
+            self.session.rollback()
+            raise AccountNotActive()
+
+        fee_cents, fee_rule_id = self._fee_for(source, transaction_type)
+        recipient = destination.client
+        transaction = self.transaction_repository.create_outgoing(
+            {
+                "type": transaction_type,
+                "amount_cents": request["amount_cents"],
+                "fee_cents": fee_cents,
+                "fee_rule_id": fee_rule_id,
+                "source_account_id": source.id,
+                "destination_account_id": destination.id,
+                "idempotency_key": idempotency_key,
+                "request_hash": request_hash,
+                "pix_key": request.get("pix_key"),
+                "counterparty_name": recipient.full_name if recipient.person_type == Client.PF else recipient.legal_name,
+                "counterparty_document": recipient.document_number,
+                "counterparty_bank_code": OUR_BANK_CODE,
+                "counterparty_branch": destination.branch,
+                "counterparty_account_number": f"{destination.account_number}-{destination.check_digit}",
+            }
+        )
+        if transaction is None:
+            # Outro pedido com a mesma chave terminou enquanto este esperava a trava.
+            self.session.rollback()
+            existing = self.transaction_repository.get_by_idempotency_key(source.id, idempotency_key)
+            return self._repeated_send(existing, request_hash)
+
+        amount_cents = transaction.amount_cents
+        balance_after = self.account_repository.debit(source.id, amount_cents + fee_cents)
+        if balance_after is None:
+            self.session.rollback()
+            raise InsufficientBalance()
+
+        # Um UPDATE so na origem (valor + tarifa) e dois lancamentos: o do
+        # valor com o saldo antes da tarifa, o da tarifa com o saldo final.
+        self.transaction_repository.create_entry(
+            source.id, transaction, Entry.VALUE, -amount_cents, balance_after + fee_cents
+        )
+        if fee_cents > 0:
+            self.transaction_repository.create_entry(source.id, transaction, Entry.FEE, -fee_cents, balance_after)
+
+        # A tarifa ainda nao entra em conta nenhuma: a conta do banco esta adiada.
+        destination_balance = self.account_repository.credit(destination.id, amount_cents)
+        self.transaction_repository.create_entry(
+            destination.id, transaction, Entry.VALUE, amount_cents, destination_balance
+        )
+        self.session.flush()
+
+        response = TransactionDTO.obj_to_dict(transaction)
+        self.session.commit()
+        return response, True
 
     def receive_ted(self, ted_data: dict) -> tuple[dict, bool]:
         """Credita uma TED que chegou de outro banco, avisada pelo Banco Central.
@@ -40,6 +146,52 @@ class TransactionController(BaseController):
             raise NotFoundPixKey()
 
         return self._receive(Transaction.PIX_IN, client.account, pix_data, pix_key)
+
+    @staticmethod
+    def _normalized_send(send_data: dict) -> dict:
+        """O pedido como ele e comparado: chave Pix normalizada, sem campos extras."""
+        request = {"type": send_data["type"], "amount_cents": send_data["amount_cents"]}
+        if send_data["type"] == "PIX":
+            request["pix_key"] = normalize_pix_key(send_data["pix_key"])
+        else:
+            request["recipient"] = dict(send_data["recipient"])
+        return request
+
+    def _find_destination(self, request: dict) -> Account:
+        if "pix_key" in request:
+            client = self.client_repository.get_by_pix_key(request["pix_key"])
+            if client is None or client.account is None:
+                raise NotFoundPixKey()
+            return client.account
+
+        recipient = request["recipient"]
+        account = None
+        if recipient["bank_code"] == OUR_BANK_CODE:
+            account = self.account_repository.get_by_number(
+                recipient["branch"], recipient["account_number"], recipient["check_digit"]
+            )
+        if account is None:
+            raise NotFoundRecipientAccount()
+        return account
+
+    def _fee_for(self, source: Account, transaction_type: str) -> tuple[int, int | None]:
+        """Tarifa do envio, contada com a conta de origem ja travada (TAR-07)."""
+        now = datetime.now(timezone.utc)
+        person_type = source.client.person_type
+        rule = self.fee_repository.get_current_rule(person_type, transaction_type, now)
+        sends_this_month = self.transaction_repository.count_completed_sends(
+            source.id, transaction_type, month_start_brt(now)
+        )
+        fee_cents = calculate_fee_cents(person_type, transaction_type, sends_this_month, rule)
+        return fee_cents, rule.id if rule is not None else None
+
+    def _repeated_send(self, existing: Transaction, request_hash: str) -> tuple[dict, bool]:
+        if existing.request_hash != request_hash:
+            self.session.rollback()
+            raise ReusedTransactionReference()
+        response = TransactionDTO.obj_to_dict(existing)
+        self.session.rollback()
+        return response, False
 
     def _receive(
         self, transaction_type: str, account: Account, notice: dict, pix_key: str | None = None

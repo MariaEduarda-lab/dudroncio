@@ -14,6 +14,7 @@ from resources import (
     CentralBankWebhookResource,
     ClientResource,
     HealthCheckResource,
+    TransactionResource,
 )
 from utils.logger import setup_logging
 
@@ -131,6 +132,7 @@ def create_app() -> FastAPI:
     client_resource = ClientResource()
     account_resource = AccountResource()
     central_bank_webhook_resource = CentralBankWebhookResource()
+    transaction_resource = TransactionResource()
 
     application.add_api_route("/", health_check_resource.on_get_home, methods=["GET"])
     application.add_api_route(
@@ -172,6 +174,11 @@ def create_app() -> FastAPI:
     application.add_api_route(
         "/webhook/central_bank/pix",
         central_bank_webhook_resource.on_post_pix,
+        methods=["POST"],
+    )
+    application.add_api_route(
+        "/accounts/{account_key}/transactions",
+        transaction_resource.on_post,
         methods=["POST"],
     )
 

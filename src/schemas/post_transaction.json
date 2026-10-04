@@ -1,0 +1,54 @@
+{
+  "title": "PostTransaction",
+  "type": "object",
+  "properties": {
+    "type": {
+      "enum": ["PIX", "TED"]
+    }
+  },
+  "required": ["type"],
+  "allOf": [
+    {
+      "if": {
+        "properties": { "type": { "const": "PIX" } },
+        "required": ["type"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "type": { "const": "PIX" },
+          "amount_cents": { "type": "integer", "minimum": 1, "maximum": 100000000000 },
+          "pix_key": { "type": "string", "minLength": 1, "maxLength": 255 }
+        },
+        "required": ["type", "amount_cents", "pix_key"],
+        "additionalProperties": false
+      }
+    },
+    {
+      "if": {
+        "properties": { "type": { "const": "TED" } },
+        "required": ["type"]
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "type": { "const": "TED" },
+          "amount_cents": { "type": "integer", "minimum": 1, "maximum": 100000000000 },
+          "recipient": {
+            "type": "object",
+            "properties": {
+              "bank_code": { "type": "string", "pattern": "^[0-9]{3}$" },
+              "branch": { "type": "string", "pattern": "^[0-9]{4}$" },
+              "account_number": { "type": "string", "pattern": "^[0-9]{8}$" },
+              "check_digit": { "type": "string", "pattern": "^[0-9]$" }
+            },
+            "required": ["bank_code", "branch", "account_number", "check_digit"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["type", "amount_cents", "recipient"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

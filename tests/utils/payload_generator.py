@@ -122,3 +122,21 @@ class PayloadGenerator:
                 "account_number": "0098765",
             },
         }
+
+    @staticmethod
+    def create_pix_send_payload(pix_key: str, amount_cents: int = 10000) -> dict:
+        return {"type": "PIX", "amount_cents": amount_cents, "pix_key": pix_key}
+
+    @staticmethod
+    def create_ted_send_payload(account: dict, amount_cents: int = 10000, bank_code: str = "999") -> dict:
+        """TED para a conta informada; `account` e a conta como o GET /accounts devolve."""
+        return {
+            "type": "TED",
+            "amount_cents": amount_cents,
+            "recipient": {
+                "bank_code": bank_code,
+                "branch": account["branch"],
+                "account_number": account["account_number"],
+                "check_digit": account["check_digit"],
+            },
+        }

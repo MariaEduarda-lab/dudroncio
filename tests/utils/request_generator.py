@@ -76,3 +76,17 @@ class RequestGenerator:
             headers={"INTERNAL-TOKEN": INTERNAL_TOKEN},
         )
         return response.response_status, response.response_json
+
+    @staticmethod
+    def POST_transaction(account_key: str, transaction_payload: dict, idempotency_key: str = None) -> BaseConnectorResponse:
+        """Envio de Pix ou TED. Sem idempotency_key, o cabecalho nao vai."""
+        headers = {"INTERNAL-TOKEN": INTERNAL_TOKEN}
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
+        response = ClientRequisition.send(
+            "POST",
+            f"/accounts/{account_key}/transactions",
+            payload=transaction_payload,
+            headers=headers,
+        )
+        return response.response_status, response.response_json

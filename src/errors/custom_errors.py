@@ -259,3 +259,42 @@ class NotFoundPixKey(QIException):
             "No account was found for the informed Pix key.",
             "Nenhuma conta foi encontrada para a chave Pix informada.",
         )
+
+
+class InvalidIdempotencyKey(QIException):
+    code = "QIT004005"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Invalid idempotency key",
+            self.code,
+            400,
+            "The Idempotency-Key header is required: 1 to 64 letters, digits, '-', '_', '.' or ':'.",
+            "O cabeçalho Idempotency-Key é obrigatório: de 1 a 64 letras, números, '-', '_', '.' ou ':'.",
+        )
+
+
+class InsufficientBalance(QIException):
+    code = "QIT004006"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Insufficient balance",
+            self.code,
+            422,
+            "The account balance does not cover the amount plus the fee.",
+            "O saldo da conta não cobre o valor mais a tarifa.",
+        )
+
+
+class TransferToSameAccount(QIException):
+    code = "QIT004007"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Transfer to the same account",
+            self.code,
+            422,
+            "The recipient account is the same as the sender account.",
+            "A conta de destino é a mesma conta de origem.",
+        )

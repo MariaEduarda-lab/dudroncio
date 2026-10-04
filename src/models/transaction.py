@@ -13,7 +13,11 @@ class Transaction(Base):
     type = Column(String(20), nullable=False)
     amount_cents = Column(BigInteger, nullable=False)
     fee_cents = Column(BigInteger, nullable=False, server_default="0")
+    fee_rule_id = Column(BigInteger, ForeignKey("fee_rule.id"))
+    source_account_id = Column(BigInteger, ForeignKey("account.id"))
     destination_account_id = Column(BigInteger, ForeignKey("account.id"))
+    idempotency_key = Column(String(64))
+    request_hash = Column(CHAR(64))
     external_id = Column(String(64))
     counterparty_name = Column(String(255), nullable=False)
     counterparty_document = Column(String(14), nullable=False)
@@ -25,7 +29,10 @@ class Transaction(Base):
 
     __table_args__ = (UniqueConstraint("transaction_key", name="uq_transaction_key"),)
 
-    destination_account = relationship("Account")
+    source_account = relationship("Account", foreign_keys=[source_account_id])
+    destination_account = relationship("Account", foreign_keys=[destination_account_id])
 
     TED_IN = "TED_IN"
     PIX_IN = "PIX_IN"
+    PIX_OUT = "PIX_OUT"
+    TED_OUT = "TED_OUT"

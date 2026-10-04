@@ -1,5 +1,7 @@
+from datetime import datetime
 from uuid import uuid4
 
+from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert
 
 from database import Context
@@ -50,6 +52,49 @@ class TransactionRepository:
         if transaction_id is None:
             return None
         return self.session.get(Transaction, transaction_id)
+
+    def create_outgoing(self, transaction_data: dict) -> Transaction | None:
+        """Grava o envio, ou devolve None se a chave de idempotencia ja foi usada.
+
+        O ON CONFLICT faz a constraint decidir: dois pedidos com a mesma
+        chave ao mesmo tempo nao passam os dois.
+        """
+        statement = (
+            insert(Transaction)
+            .values(transaction_key=uuid4(), **transaction_data)
+            .on_conflict_do_nothing(constraint="uq_transaction_idempotency")
+            .returning(Transaction.id)
+        )
+        transaction_id = self.session.execute(statement).scalar_one_or_none()
+        if transaction_id is None:
+            return None
+        return self.session.get(Transaction, transaction_id)
+
+    def get_by_idempotency_key(self, source_account_id: int, idempotency_key: str) -> Transaction | None:
+        return (
+            self.session.query(Transaction)
+            .filter(
+                Transaction.source_account_id == source_account_id,
+                Transaction.idempotency_key == idempotency_key,
+            )
+            .first()
+        )
+
+    def count_completed_sends(self, account_id: int, transaction_type: str, since: datetime) -> int:
+        """Envios concluidos de um tipo desde `since`. Recusas nao viram linha.
+
+        Quem chama ja travou a conta: dois envios simultaneos nao contam o
+        mesmo numero (TAR-07).
+        """
+        return (
+            self.session.query(func.count(Transaction.id))
+            .filter(
+                Transaction.source_account_id == account_id,
+                Transaction.type == transaction_type,
+                Transaction.created_at >= since,
+            )
+            .scalar()
+        )
 
     def get_incoming(self, transaction_type: str, bank_code: str, external_id: str) -> Transaction | None:
         return (

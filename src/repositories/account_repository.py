@@ -52,6 +52,39 @@ class AccountRepository:
             .first()
         )
 
+    def lock_by_ids(self, account_ids: list[int]) -> list[Account]:
+        """Trava as contas sempre na ordem do id, menor primeiro.
+
+        Dois envios cruzados (A para B e B para A) pedem as travas na mesma
+        ordem, entao um espera o outro em vez de travarem um ao outro.
+        O populate_existing relê o status de quem ja estava em memoria.
+        """
+        return (
+            self.session.query(Account)
+            .filter(Account.id.in_(account_ids))
+            .order_by(Account.id)
+            .with_for_update(of=Account)
+            .populate_existing()
+            .all()
+        )
+
+    def debit(self, account_id: int, amount_cents: int) -> int | None:
+        """Subtrai do saldo num unico UPDATE, so se o saldo cobrir o valor.
+
+        Nenhuma linha afetada (None) quer dizer saldo insuficiente: o saldo
+        nunca e lido, calculado no Python e gravado de volta.
+        """
+        return self.session.execute(
+            update(Account)
+            .where(
+                Account.id == account_id,
+                Account.status == Account.ACTIVE,
+                Account.balance_cents >= amount_cents,
+            )
+            .values(balance_cents=Account.balance_cents - amount_cents)
+            .returning(Account.balance_cents)
+        ).scalar_one_or_none()
+
     def credit(self, account_id: int, amount_cents: int) -> int | None:
         """Soma ao saldo num unico UPDATE e devolve o saldo que ficou.
 
