@@ -216,3 +216,14 @@ def describe_schema_error(error: ValidationError) -> str:
 
 
 VALIDATORS_WITHOUT_VALUES = {"required", "additionalProperties"}
+
+
+def matches_schema(data, schema_file_name: str) -> bool:
+    """Diz se um JSON que veio de FORA (a resposta de outro servico) segue o schema."""
+    schema = SchemaCache.get_schema(schema_file_name)
+    resolver = RefResolver(f"file://{SCHEMA_PATH}/", None)
+    try:
+        validate(data, schema, resolver=resolver)
+    except ValidationError:
+        return False
+    return True

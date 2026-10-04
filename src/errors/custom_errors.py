@@ -298,3 +298,29 @@ class TransferToSameAccount(QIException):
             "The recipient account is the same as the sender account.",
             "A conta de destino é a mesma conta de origem.",
         )
+
+
+class CentralBankRefused(QIException):
+    code = "QIT004008"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Refused by the Central Bank",
+            self.code,
+            422,
+            "The Central Bank refused the transfer to the other bank. Nothing was changed.",
+            "O Banco Central recusou o envio para o outro banco. Nada foi alterado.",
+        )
+
+
+class CentralBankUnavailable(QIException):
+    code = "QIT004009"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Central Bank unavailable",
+            self.code,
+            503,
+            "The Central Bank did not confirm the transfer in time. Nothing was changed; try again.",
+            "O Banco Central não confirmou o envio a tempo. Nada foi alterado; tente de novo.",
+        )

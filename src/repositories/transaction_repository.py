@@ -61,7 +61,7 @@ class TransactionRepository:
         """
         statement = (
             insert(Transaction)
-            .values(transaction_key=uuid4(), **transaction_data)
+            .values(**{"transaction_key": uuid4(), **transaction_data})
             .on_conflict_do_nothing(constraint="uq_transaction_idempotency")
             .returning(Transaction.id)
         )

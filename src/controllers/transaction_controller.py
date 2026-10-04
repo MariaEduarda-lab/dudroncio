@@ -2,12 +2,16 @@ import hashlib
 import json
 import re
 from datetime import datetime, timezone
+from uuid import uuid4
 
+from connectors import CentralBankConnector
 from constants import OUR_BANK_CODE
 from controllers.base_controller import BaseController
 from dtos import TransactionDTO
 from errors import (
     AccountNotActive,
+    CentralBankRefused,
+    CentralBankUnavailable,
     InsufficientBalance,
     InvalidIdempotencyKey,
     NotFoundAccount,
@@ -20,9 +24,11 @@ from models import Account, Client, Entry, Transaction
 from repositories import AccountRepository, ClientRepository, FeeRepository, TransactionRepository
 from utils.fee import calculate_fee_cents, month_start_brt
 from utils.pix_key import normalize_pix_key
+from utils.schema_handler import matches_schema
 
 IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 SEND_TYPES = {"PIX": Transaction.PIX_OUT, "TED": Transaction.TED_OUT}
+CONFIRMATION_SCHEMA = "central_bank_confirmation.json"
 
 
 class TransactionController(BaseController):
@@ -31,15 +37,15 @@ class TransactionController(BaseController):
         self.account_repository = AccountRepository(self.context)
         self.client_repository = ClientRepository(self.context)
         self.fee_repository = FeeRepository(self.context)
+        self.central_bank_connector = CentralBankConnector()
         self.transaction_repository = TransactionRepository(self.context)
 
     def send(self, account_key: str, send_data: dict, idempotency_key: str | None) -> tuple[dict, bool]:
-        """Envia Pix ou TED de uma conta nossa para outra conta nossa.
+        """Envia Pix ou TED. Devolve a transacao e se ela foi criada agora.
 
-        Devolve a transacao e se ela foi criada agora. Tudo acontece numa
-        transacao so do banco de dados: contas travadas na ordem do id,
-        cota contada com a conta travada, chave de idempotencia reservada
-        antes do debito, debito atomico, credito e lancamentos. Qualquer
+        O pedido repetido (mesma chave de idempotencia) devolve a transacao
+        que ja existe. Destino nosso: liquidado aqui dentro. Destino em
+        outro banco: so acontece se o Banco Central confirmar. Qualquer
         recusa desfaz tudo e deixa a chave livre para uma nova tentativa.
         """
         if idempotency_key is None or not IDEMPOTENCY_KEY_PATTERN.match(idempotency_key):
@@ -49,9 +55,16 @@ class TransactionController(BaseController):
         if source is None:
             raise NotFoundAccount(account_key)
 
-        transaction_type = SEND_TYPES[send_data["type"]]
         request = self._normalized_send(send_data)
         request_hash = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
+        outgoing = {
+            "type": SEND_TYPES[send_data["type"]],
+            "amount_cents": request["amount_cents"],
+            "source_account_id": source.id,
+            "idempotency_key": idempotency_key,
+            "request_hash": request_hash,
+            "pix_key": request.get("pix_key"),
+        }
 
         # Pedido repetido devolve a transacao que ja existe, mesmo que o
         # destino tenha mudado de estado depois (TRA-12).
@@ -59,7 +72,13 @@ class TransactionController(BaseController):
         if existing is not None:
             return self._repeated_send(existing, request_hash)
 
-        destination = self._find_destination(request)
+        destination = self._find_our_destination(request)
+        if destination is None:
+            return self._send_to_other_bank(source, request, outgoing)
+        return self._send_to_our_client(source, destination, outgoing)
+
+    def _send_to_our_client(self, source: Account, destination: Account, outgoing: dict) -> tuple[dict, bool]:
+        """Liquidado aqui dentro, sem Banco Central (TRA-16)."""
         if destination.id == source.id:
             raise TransferToSameAccount()
 
@@ -68,56 +87,133 @@ class TransactionController(BaseController):
             self.session.rollback()
             raise AccountNotActive()
 
-        fee_cents, fee_rule_id = self._fee_for(source, transaction_type)
-        recipient = destination.client
+        fee_cents, fee_rule_id = self._fee_for(source, outgoing["type"])
         transaction = self.transaction_repository.create_outgoing(
             {
-                "type": transaction_type,
-                "amount_cents": request["amount_cents"],
+                **outgoing,
                 "fee_cents": fee_cents,
                 "fee_rule_id": fee_rule_id,
-                "source_account_id": source.id,
                 "destination_account_id": destination.id,
-                "idempotency_key": idempotency_key,
-                "request_hash": request_hash,
-                "pix_key": request.get("pix_key"),
-                "counterparty_name": recipient.full_name if recipient.person_type == Client.PF else recipient.legal_name,
-                "counterparty_document": recipient.document_number,
-                "counterparty_bank_code": OUR_BANK_CODE,
-                "counterparty_branch": destination.branch,
-                "counterparty_account_number": f"{destination.account_number}-{destination.check_digit}",
+                **self._counterparty_of(destination),
             }
         )
         if transaction is None:
-            # Outro pedido com a mesma chave terminou enquanto este esperava a trava.
-            self.session.rollback()
-            existing = self.transaction_repository.get_by_idempotency_key(source.id, idempotency_key)
-            return self._repeated_send(existing, request_hash)
+            return self._repeated_after_wait(source, outgoing)
 
-        amount_cents = transaction.amount_cents
-        balance_after = self.account_repository.debit(source.id, amount_cents + fee_cents)
+        self._debit_with_entries(source, transaction)
+
+        # A tarifa ainda nao entra em conta nenhuma: a conta do banco esta adiada.
+        destination_balance = self.account_repository.credit(destination.id, transaction.amount_cents)
+        self.transaction_repository.create_entry(
+            destination.id, transaction, Entry.VALUE, transaction.amount_cents, destination_balance
+        )
+        return self._commit_created(transaction)
+
+    def _send_to_other_bank(self, source: Account, request: dict, outgoing: dict) -> tuple[dict, bool]:
+        """Pergunta ao Banco Central com a conta travada e o valor ja debitado.
+
+        Sem saldo, nem chega a perguntar. Se ele nao confirma, o rollback
+        devolve o debito: nada foi registrado e a chave segue livre (TRA-18).
+        """
+        self.account_repository.lock_by_ids([source.id])
+        if source.status != Account.ACTIVE:
+            self.session.rollback()
+            raise AccountNotActive()
+
+        fee_cents, fee_rule_id = self._fee_for(source, outgoing["type"])
+        balance_after = self.account_repository.debit(source.id, outgoing["amount_cents"] + fee_cents)
         if balance_after is None:
             self.session.rollback()
             raise InsufficientBalance()
 
+        transaction_key = uuid4()
+        recipient = self._ask_central_bank(str(transaction_key), source, request)
+        transaction = self.transaction_repository.create_outgoing(
+            {
+                **outgoing,
+                "transaction_key": transaction_key,
+                "fee_cents": fee_cents,
+                "fee_rule_id": fee_rule_id,
+                "counterparty_name": recipient["name"],
+                "counterparty_document": recipient["document"],
+                "counterparty_bank_code": recipient["bank_code"],
+                "counterparty_branch": recipient["branch"],
+                "counterparty_account_number": recipient["account_number"],
+            }
+        )
+        if transaction is None:
+            return self._repeated_after_wait(source, outgoing)
+
+        self._create_debit_entries(source, transaction, balance_after)
+        return self._commit_created(transaction)
+
+    def _ask_central_bank(self, transaction_key: str, source: Account, request: dict) -> dict:
+        """Dados do recebedor no outro banco, se o Banco Central confirmou o envio."""
+        payer = {key.removeprefix("counterparty_"): value for key, value in self._counterparty_of(source).items()}
+        if "pix_key" in request:
+            response = self.central_bank_connector.send_pix(
+                transaction_key, request["amount_cents"], request["pix_key"], payer
+            )
+            not_found = NotFoundPixKey
+        else:
+            response = self.central_bank_connector.send_ted(
+                transaction_key, request["amount_cents"], request["recipient"], payer
+            )
+            not_found = NotFoundRecipientAccount
+
+        if response is not None and response.status == 200 and matches_schema(response.json, CONFIRMATION_SCHEMA):
+            return response.json["recipient"]
+
+        self.session.rollback()
+        if response is not None and response.status == 404:
+            raise not_found()
+        if response is not None and 400 <= response.status < 500:
+            raise CentralBankRefused()
+        # Erro dele, tempo esgotado ou resposta sem sentido: na duvida, o
+        # banco nao age as cegas.
+        raise CentralBankUnavailable()
+
+    def _repeated_after_wait(self, source: Account, outgoing: dict) -> tuple[dict, bool]:
+        # Outro pedido com a mesma chave terminou enquanto este esperava a trava.
+        self.session.rollback()
+        existing = self.transaction_repository.get_by_idempotency_key(source.id, outgoing["idempotency_key"])
+        return self._repeated_send(existing, outgoing["request_hash"])
+
+    def _debit_with_entries(self, source: Account, transaction: Transaction) -> None:
+        balance_after = self.account_repository.debit(source.id, transaction.amount_cents + transaction.fee_cents)
+        if balance_after is None:
+            self.session.rollback()
+            raise InsufficientBalance()
+        self._create_debit_entries(source, transaction, balance_after)
+
+    def _create_debit_entries(self, source: Account, transaction: Transaction, balance_after: int) -> None:
         # Um UPDATE so na origem (valor + tarifa) e dois lancamentos: o do
         # valor com o saldo antes da tarifa, o da tarifa com o saldo final.
         self.transaction_repository.create_entry(
-            source.id, transaction, Entry.VALUE, -amount_cents, balance_after + fee_cents
+            source.id, transaction, Entry.VALUE, -transaction.amount_cents, balance_after + transaction.fee_cents
         )
-        if fee_cents > 0:
-            self.transaction_repository.create_entry(source.id, transaction, Entry.FEE, -fee_cents, balance_after)
+        if transaction.fee_cents > 0:
+            self.transaction_repository.create_entry(
+                source.id, transaction, Entry.FEE, -transaction.fee_cents, balance_after
+            )
 
-        # A tarifa ainda nao entra em conta nenhuma: a conta do banco esta adiada.
-        destination_balance = self.account_repository.credit(destination.id, amount_cents)
-        self.transaction_repository.create_entry(
-            destination.id, transaction, Entry.VALUE, amount_cents, destination_balance
-        )
+    def _commit_created(self, transaction: Transaction) -> tuple[dict, bool]:
         self.session.flush()
-
         response = TransactionDTO.obj_to_dict(transaction)
         self.session.commit()
         return response, True
+
+    @staticmethod
+    def _counterparty_of(account: Account) -> dict:
+        """Dados de uma conta nossa como outra parte de uma transacao."""
+        client = account.client
+        return {
+            "counterparty_name": client.full_name if client.person_type == Client.PF else client.legal_name,
+            "counterparty_document": client.document_number,
+            "counterparty_bank_code": OUR_BANK_CODE,
+            "counterparty_branch": account.branch,
+            "counterparty_account_number": f"{account.account_number}-{account.check_digit}",
+        }
 
     def receive_ted(self, ted_data: dict) -> tuple[dict, bool]:
         """Credita uma TED que chegou de outro banco, avisada pelo Banco Central.
@@ -157,19 +253,27 @@ class TransactionController(BaseController):
             request["recipient"] = dict(send_data["recipient"])
         return request
 
-    def _find_destination(self, request: dict) -> Account:
+    def _find_our_destination(self, request: dict) -> Account | None:
+        """Conta de destino no nosso banco, ou None se o destino e outro banco.
+
+        Chave Pix de um cliente nosso, ou TED com o nosso codigo: o envio e
+        interno. Se parece nosso mas nao existe (cliente sem conta, conta
+        999 inexistente), o pedido e recusado aqui mesmo.
+        """
         if "pix_key" in request:
             client = self.client_repository.get_by_pix_key(request["pix_key"])
-            if client is None or client.account is None:
+            if client is None:
+                return None
+            if client.account is None:
                 raise NotFoundPixKey()
             return client.account
 
         recipient = request["recipient"]
-        account = None
-        if recipient["bank_code"] == OUR_BANK_CODE:
-            account = self.account_repository.get_by_number(
-                recipient["branch"], recipient["account_number"], recipient["check_digit"]
-            )
+        if recipient["bank_code"] != OUR_BANK_CODE:
+            return None
+        account = self.account_repository.get_by_number(
+            recipient["branch"], recipient["account_number"], recipient["check_digit"]
+        )
         if account is None:
             raise NotFoundRecipientAccount()
         return account
