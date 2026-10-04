@@ -4,7 +4,7 @@ from models import Transaction
 class TransactionDTO:
     @staticmethod
     def obj_to_dict(transaction: Transaction) -> dict:
-        return {
+        response = {
             "transaction_key": str(transaction.transaction_key),
             "type": transaction.type,
             "amount_cents": transaction.amount_cents,
@@ -19,3 +19,6 @@ class TransactionDTO:
             },
             "created_at": transaction.created_at.isoformat(),
         }
+        if transaction.type == Transaction.PIX_IN:
+            response["pix_key"] = transaction.pix_key
+        return response

@@ -169,6 +169,11 @@ def create_app() -> FastAPI:
         central_bank_webhook_resource.on_post_ted,
         methods=["POST"],
     )
+    application.add_api_route(
+        "/webhook/central_bank/pix",
+        central_bank_webhook_resource.on_post_pix,
+        methods=["POST"],
+    )
 
     register_error_handlers(application)
 

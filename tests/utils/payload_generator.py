@@ -101,3 +101,24 @@ class PayloadGenerator:
                 "account_number": "0098765",
             },
         }
+
+    @staticmethod
+    def create_incoming_pix_payload(
+        pix_key: str, amount_cents: int = 15000, external_id: str = None, payer_bank_code: str = "001"
+    ) -> dict:
+        """O aviso que o Banco Central manda quando chega um Pix de outro banco."""
+        if external_id is None:
+            external_id = f"E{uuid4().hex}"
+
+        return {
+            "external_id": external_id,
+            "amount_cents": amount_cents,
+            "pix_key": pix_key,
+            "payer": {
+                "name": "Carlos Pereira",
+                "document": "52998224725",
+                "bank_code": payer_bank_code,
+                "branch": "1234",
+                "account_number": "0098765",
+            },
+        }

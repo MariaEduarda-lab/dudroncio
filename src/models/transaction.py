@@ -20,6 +20,7 @@ class Transaction(Base):
     counterparty_bank_code = Column(CHAR(3), nullable=False)
     counterparty_branch = Column(String(4), nullable=False)
     counterparty_account_number = Column(String(20), nullable=False)
+    pix_key = Column(String(255))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     __table_args__ = (UniqueConstraint("transaction_key", name="uq_transaction_key"),)
@@ -27,3 +28,4 @@ class Transaction(Base):
     destination_account = relationship("Account")
 
     TED_IN = "TED_IN"
+    PIX_IN = "PIX_IN"

@@ -246,3 +246,16 @@ class AccountNotActive(QIException):
             "Only active accounts can send or receive money.",
             "Só contas ativas podem enviar ou receber dinheiro.",
         )
+
+
+class NotFoundPixKey(QIException):
+    code = "QIT004004"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Pix key not found",
+            self.code,
+            404,
+            "No account was found for the informed Pix key.",
+            "Nenhuma conta foi encontrada para a chave Pix informada.",
+        )

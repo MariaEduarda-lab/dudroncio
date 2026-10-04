@@ -216,8 +216,8 @@ INSERT INTO fee_rule (person_type, transaction_type, free_monthly_quota, fee_cen
     ('PJ', 'PIX_OUT', 20, 99, '2026-01-01 00:00:00-03'),
     ('PJ', 'TED_OUT', 2, 499, '2026-01-01 00:00:00-03');
 
--- Todo movimento de dinheiro. Nesta etapa so existe o recebimento de TED;
--- os outros tipos entram com os testes deles.
+-- Todo movimento de dinheiro. Nesta etapa existem os recebimentos de TED e
+-- de Pix; os envios entram com os testes deles.
 CREATE TABLE transaction(
     id                              BIGSERIAL PRIMARY KEY,
     transaction_key                 UUID NOT NULL,
@@ -232,14 +232,18 @@ CREATE TABLE transaction(
     counterparty_bank_code          CHAR(3) NOT NULL,
     counterparty_branch             VARCHAR(4) NOT NULL,
     counterparty_account_number     VARCHAR(20) NOT NULL,
+    -- Chave Pix pela qual o recebimento chegou, ja normalizada.
+    pix_key                         VARCHAR(255),
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
     CONSTRAINT uq_transaction_key UNIQUE(transaction_key),
-    CONSTRAINT ck_transaction_type CHECK (type IN ('TED_IN')),
+    CONSTRAINT ck_transaction_type CHECK (type IN ('TED_IN', 'PIX_IN')),
     CONSTRAINT ck_transaction_amount CHECK (amount_cents BETWEEN 1 AND 100000000000),
     CONSTRAINT ck_transaction_fee CHECK (fee_cents >= 0),
     CONSTRAINT ck_transaction_incoming CHECK (
-        type <> 'TED_IN' OR (destination_account_id IS NOT NULL AND external_id IS NOT NULL AND fee_cents = 0)
+        type NOT IN ('TED_IN', 'PIX_IN')
+        OR (destination_account_id IS NOT NULL AND external_id IS NOT NULL AND fee_cents = 0)
     ),
+    CONSTRAINT ck_transaction_pix_key CHECK ((type = 'PIX_IN') = (pix_key IS NOT NULL)),
     CONSTRAINT ck_transaction_document CHECK (counterparty_document ~ '^([0-9]{11}|[A-Z0-9]{12}[0-9]{2})$')
 );
 
@@ -248,7 +252,7 @@ CREATE TABLE transaction(
 -- mesmo texto sem um apagar o recebimento do outro.
 CREATE UNIQUE INDEX ux_transaction_incoming_ref
     ON transaction (type, counterparty_bank_code, external_id)
-    WHERE type IN ('TED_IN');
+    WHERE type IN ('TED_IN', 'PIX_IN');
 
 -- Um lancamento por mudanca de saldo: credito positivo, debito negativo.
 -- A soma dos lancamentos de uma conta e o saldo dela.

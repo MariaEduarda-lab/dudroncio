@@ -1,14 +1,16 @@
 from controllers.base_controller import BaseController
 from dtos import TransactionDTO
-from errors import AccountNotActive, NotFoundRecipientAccount, ReusedTransactionReference
+from errors import AccountNotActive, NotFoundPixKey, NotFoundRecipientAccount, ReusedTransactionReference
 from models import Account, Entry, Transaction
-from repositories import AccountRepository, TransactionRepository
+from repositories import AccountRepository, ClientRepository, TransactionRepository
+from utils.pix_key import normalize_pix_key
 
 
 class TransactionController(BaseController):
     def __init__(self) -> None:
         super().__init__(__name__)
         self.account_repository = AccountRepository(self.context)
+        self.client_repository = ClientRepository(self.context)
         self.transaction_repository = TransactionRepository(self.context)
 
     def receive_ted(self, ted_data: dict) -> tuple[dict, bool]:
@@ -24,12 +26,30 @@ class TransactionController(BaseController):
         if account is None:
             raise NotFoundRecipientAccount()
 
-        transaction = self.transaction_repository.create_incoming_ted(account, ted_data)
+        return self._receive(Transaction.TED_IN, account, ted_data)
+
+    def receive_pix(self, pix_data: dict) -> tuple[dict, bool]:
+        """Credita um Pix que chegou de outro banco, encontrando a conta pela chave.
+
+        A chave e guardada normalizada: o mesmo aviso com a chave escrita de
+        outro jeito (com mascara, em maiusculas) continua sendo o mesmo Pix.
+        """
+        pix_key = normalize_pix_key(pix_data["pix_key"])
+        client = self.client_repository.get_by_pix_key(pix_key)
+        if client is None or client.account is None:
+            raise NotFoundPixKey()
+
+        return self._receive(Transaction.PIX_IN, client.account, pix_data, pix_key)
+
+    def _receive(
+        self, transaction_type: str, account: Account, notice: dict, pix_key: str | None = None
+    ) -> tuple[dict, bool]:
+        transaction = self.transaction_repository.create_incoming(transaction_type, account, notice, pix_key)
         if transaction is None:
             existing = self.transaction_repository.get_incoming(
-                Transaction.TED_IN, ted_data["payer"]["bank_code"], ted_data["external_id"]
+                transaction_type, notice["payer"]["bank_code"], notice["external_id"]
             )
-            if not self._same_ted(existing, account, ted_data):
+            if not self._same_notice(existing, account, notice, pix_key):
                 self.session.rollback()
                 raise ReusedTransactionReference()
             response = TransactionDTO.obj_to_dict(existing)
@@ -55,11 +75,12 @@ class TransactionController(BaseController):
         return response, True
 
     @staticmethod
-    def _same_ted(transaction: Transaction, account: Account, ted_data: dict) -> bool:
-        payer = ted_data["payer"]
+    def _same_notice(transaction: Transaction, account: Account, notice: dict, pix_key: str | None) -> bool:
+        payer = notice["payer"]
         return (
             transaction.destination_account_id == account.id
-            and transaction.amount_cents == ted_data["amount_cents"]
+            and transaction.amount_cents == notice["amount_cents"]
+            and transaction.pix_key == pix_key
             and transaction.counterparty_name == payer["name"]
             and transaction.counterparty_document == payer["document"]
             and transaction.counterparty_branch == payer["branch"]

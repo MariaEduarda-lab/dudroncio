@@ -16,3 +16,11 @@ class CentralBankWebhookResource:
             content=jsonable_encoder(transaction),
             status_code=http_status.HTTP_201_CREATED if created else http_status.HTTP_200_OK,
         )
+
+    @SchemaHandler.validate("post_central_bank_pix.json")
+    def on_post_pix(self, payload: dict) -> JSONResponse:
+        transaction, created = TransactionController().receive_pix(payload)
+        return JSONResponse(
+            content=jsonable_encoder(transaction),
+            status_code=http_status.HTTP_201_CREATED if created else http_status.HTTP_200_OK,
+        )

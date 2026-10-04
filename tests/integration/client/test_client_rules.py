@@ -1,10 +1,8 @@
-import random
-import string
 from uuid import uuid4
 
 import pytest
 
-from tests.utils import PayloadGenerator, RequestGenerator, INTERNAL_TOKEN
+from tests.utils import PayloadGenerator, RandomGenerator, RequestGenerator, INTERNAL_TOKEN
 from tests.utils.requisition import ClientRequisition
 
 
@@ -15,15 +13,7 @@ from tests.utils.requisition import ClientRequisition
 
 
 def alphanumeric_cnpj() -> str:
-    """CNPJ alfanumérico válido: letras valem o código ASCII menos 48."""
-    base = [random.choice(string.digits + string.ascii_uppercase) for _ in range(8)] + list("0001")
-    values = [ord(character) - 48 for character in base]
-    for weights in ([5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2], [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]):
-        remainder = sum(value * weight for value, weight in zip(values, weights)) % 11
-        values.append(0 if remainder < 2 else 11 - remainder)
-    if not any(character.isalpha() for character in base):
-        return alphanumeric_cnpj()
-    return "".join(base) + "".join(str(digit) for digit in values[12:])
+    return RandomGenerator.generate_alphanumeric_cnpj()
 
 
 def masked(cnpj: str) -> str:

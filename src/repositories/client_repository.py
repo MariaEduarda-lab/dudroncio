@@ -4,6 +4,7 @@ from sqlalchemy.orm import selectinload
 
 from database import Context
 from models import Client, LegalRepresentative
+from utils.pix_key import is_email_key, normalize_pix_key
 
 
 class ClientRepository:
@@ -61,6 +62,15 @@ class ClientRepository:
     def get_by_document(self, document_number: str) -> Client | None:
         return self.session.query(Client).filter(Client.document_number == document_number).first()
 
+    def get_by_pix_key(self, pix_key: str) -> Client | None:
+        """Cliente dono da chave Pix: o e-mail ou o documento do cadastro (CLI-12).
+
+        Com "@" e e-mail; senao e documento, sem mascara e em maiusculas. Os
+        dados do representante (CPF e e-mail) nao sao chave Pix: so a tabela
+        de clientes e consultada.
+        """
+        return self.session.query(Client).filter(_pix_key_filter(normalize_pix_key(pix_key))).first()
+
     def get_by_email(self, email: str) -> Client | None:
         return self.session.query(Client).filter(Client.email == email).first()
 
@@ -80,3 +90,9 @@ class ClientRepository:
             phone_number=client_data["phone_number"],
             address=dict(client_data["address"]),
         )
+
+
+def _pix_key_filter(pix_key: str):
+    if is_email_key(pix_key):
+        return Client.email == pix_key
+    return Client.document_number == pix_key

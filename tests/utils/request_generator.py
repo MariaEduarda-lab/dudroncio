@@ -66,3 +66,13 @@ class RequestGenerator:
             headers={"INTERNAL-TOKEN": INTERNAL_TOKEN},
         )
         return response.response_status, response.response_json
+
+    @staticmethod
+    def POST_webhook_central_bank_pix(pix_payload: dict) -> BaseConnectorResponse:
+        response = ClientRequisition.send(
+            "POST",
+            "/webhook/central_bank/pix",
+            payload=pix_payload,
+            headers={"INTERNAL-TOKEN": INTERNAL_TOKEN},
+        )
+        return response.response_status, response.response_json

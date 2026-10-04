@@ -5,7 +5,7 @@ from sqlalchemy.dialects.postgresql import insert
 from database import Context
 from models import Account, Entry, Transaction
 
-INCOMING_TYPES = [Transaction.TED_IN]
+INCOMING_TYPES = [Transaction.TED_IN, Transaction.PIX_IN]
 
 
 class TransactionRepository:
@@ -14,28 +14,31 @@ class TransactionRepository:
     def __init__(self, context: Context) -> None:
         self.session = context.db_session
 
-    def create_incoming_ted(self, account: Account, ted_data: dict) -> Transaction | None:
-        """Grava a TED recebida, ou devolve None se o aviso ja foi gravado.
+    def create_incoming(
+        self, transaction_type: str, account: Account, notice: dict, pix_key: str | None = None
+    ) -> Transaction | None:
+        """Grava o recebimento (TED ou Pix), ou devolve None se o aviso ja foi gravado.
 
         O ON CONFLICT faz o indice unico decidir: dois avisos iguais ao
         mesmo tempo nao passam os dois, porque o segundo espera o primeiro
         terminar e entao encontra a linha (TRA-21).
         """
-        payer = ted_data["payer"]
+        payer = notice["payer"]
         statement = (
             insert(Transaction)
             .values(
                 transaction_key=uuid4(),
-                type=Transaction.TED_IN,
-                amount_cents=ted_data["amount_cents"],
+                type=transaction_type,
+                amount_cents=notice["amount_cents"],
                 fee_cents=0,
                 destination_account_id=account.id,
-                external_id=ted_data["external_id"],
+                external_id=notice["external_id"],
                 counterparty_name=payer["name"],
                 counterparty_document=payer["document"],
                 counterparty_bank_code=payer["bank_code"],
                 counterparty_branch=payer["branch"],
                 counterparty_account_number=payer["account_number"],
+                pix_key=pix_key,
             )
             .on_conflict_do_nothing(
                 index_elements=[Transaction.type, Transaction.counterparty_bank_code, Transaction.external_id],
