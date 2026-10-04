@@ -201,7 +201,18 @@ def describe_schema_error(error: ValidationError) -> str:
     for part in error.absolute_path:
         location.append(str(part))
 
-    if location:
-        return f"{error.message} in {'.'.join(location)}"
+    message = error.message
+    # A mensagem do jsonschema costuma repetir o VALOR recebido ("'123' does
+    # not match ..."). Ele pode ser uma senha ou um CPF, que nao podem
+    # voltar na resposta. So "required" e "additionalProperties" falam
+    # apenas de nomes de campos; nos outros casos, diz-se a regra, nao o valor.
+    if error.validator not in VALIDATORS_WITHOUT_VALUES:
+        message = f"Invalid value ({error.validator})"
 
-    return error.message
+    if location:
+        return f"{message} in {'.'.join(location)}"
+
+    return message
+
+
+VALIDATORS_WITHOUT_VALUES = {"required", "additionalProperties"}

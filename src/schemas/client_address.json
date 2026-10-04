@@ -1,0 +1,16 @@
+{
+  "title": "ClientAddress",
+  "type": "object",
+  "properties": {
+    "street": {"type": "string", "minLength": 1, "maxLength": 255},
+    "number": {"type": "string", "minLength": 1, "maxLength": 30},
+    "complement": {"type": "string", "maxLength": 100},
+    "neighborhood": {"type": "string", "minLength": 1, "maxLength": 100},
+    "city": {"type": "string", "minLength": 1, "maxLength": 100},
+    "state": {"type": "string", "pattern": "^[A-Z]{2}$"},
+    "postal_code": {"type": "string", "pattern": "^[0-9]{8}$"},
+    "country": {"type": "string", "pattern": "^[A-Z]{2}$"}
+  },
+  "required": ["street", "number", "neighborhood", "city", "state", "postal_code", "country"],
+  "additionalProperties": false
+}

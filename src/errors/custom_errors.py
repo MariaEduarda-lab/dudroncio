@@ -17,12 +17,12 @@ class NotFoundClient(QIException):
 class InvalidCnpj(QIException):
     code = "QIT002002"
 
-    def __init__(self, cnpj) -> None:
+    def __init__(self) -> None:
         super().__init__(
             "Invalid CNPJ",
             self.code,
             422,
-            f"The CNPJ {cnpj} is invalid.",
+            "The CNPJ is invalid.",
             "O CNPJ informado não é válido.",
         )
 
@@ -30,12 +30,12 @@ class InvalidCnpj(QIException):
 class DuplicatedCnpj(QIException):
     code = "QIT002003"
 
-    def __init__(self, cnpj) -> None:
+    def __init__(self) -> None:
         super().__init__(
             "CNPJ already registered",
             self.code,
             409,
-            f"There is already a client with CNPJ {cnpj}.",
+            "There is already a client with this CNPJ.",
             "Já existe um cliente cadastrado com este CNPJ.",
         )
 
@@ -43,12 +43,12 @@ class DuplicatedCnpj(QIException):
 class DuplicatedClientEmail(QIException):
     code = "QIT002004"
 
-    def __init__(self, email) -> None:
+    def __init__(self) -> None:
         super().__init__(
             "Email already registered",
             self.code,
             409,
-            f"There is already a client or representative with email {email}.",
+            "There is already a client or representative with this email.",
             "Já existe um cadastro com este e-mail.",
         )
 
@@ -154,6 +154,45 @@ class AccountWithBalanceCannotBeClosed(QIException):
             409,
             "Only an account with zero balance can be closed.",
             "Só é possível encerrar uma conta com saldo zero.",
+        )
+
+
+class InvalidCpf(QIException):
+    code = "QIT002009"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Invalid CPF",
+            self.code,
+            422,
+            "The CPF is invalid.",
+            "O CPF informado não é válido.",
+        )
+
+
+class DuplicatedCpf(QIException):
+    code = "QIT002010"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "CPF already registered",
+            self.code,
+            409,
+            "There is already a client with this CPF.",
+            "Já existe um cliente cadastrado com este CPF.",
+        )
+
+
+class InvalidBirthdate(QIException):
+    code = "QIT002011"
+
+    def __init__(self, birthdate) -> None:
+        super().__init__(
+            "Invalid birthdate",
+            self.code,
+            422,
+            f"The birthdate {birthdate} is invalid or underage.",
+            "A data de nascimento é inválida ou a pessoa é menor de idade.",
         )
 
 
