@@ -1,3 +1,4 @@
 from controllers.client_controller import ClientController
 from controllers.account_controller import AccountController
 from controllers.transaction_controller import TransactionController
+from controllers.statement_controller import StatementController

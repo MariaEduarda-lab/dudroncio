@@ -3,3 +3,4 @@ from resources.client import ClientResource
 from resources.account import AccountResource
 from resources.central_bank_webhook import CentralBankWebhookResource
 from resources.transaction import TransactionResource
+from resources.statement import StatementResource
