@@ -1,22 +1,28 @@
-from sqlalchemy import BigInteger, CHAR, Column, DateTime, String, UniqueConstraint, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy import BigInteger, Column, Date, DateTime, String, UniqueConstraint, func
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 
 from models.base import Base
 
 
 class Client(Base):
+    """Cliente PF ou PJ numa tabela so; os campos de cada tipo sao opcionais
+    aqui e obrigatorios pelos CHECKs do database.sql."""
+
     __tablename__ = "client"
 
     id = Column(BigInteger, primary_key=True)
-    client_key = Column(CHAR(36), nullable=False)
-    cnpj = Column(String(14), nullable=False)
-    legal_name = Column(String(255), nullable=False)
+    client_key = Column(UUID(as_uuid=True), nullable=False)
+    person_type = Column(String(2), nullable=False)
+    document_number = Column(String(14), nullable=False)
+    full_name = Column(String(255))
+    birthdate = Column(Date)
+    password_hash = Column(String(255))
+    legal_name = Column(String(255))
     trade_name = Column(String(255))
-    client_type = Column(String(10), nullable=False)
-    cnpj_status = Column(String(30), nullable=False)
-    primary_activity = Column(String(255), nullable=False)
-    monthly_revenue_cents = Column(BigInteger, nullable=False)
+    cnpj_status = Column(String(30))
+    primary_activity = Column(String(255))
+    monthly_income_cents = Column(BigInteger, nullable=False)
     email = Column(String(255), nullable=False)
     phone_number = Column(String(16), nullable=False)
     address = Column(JSONB, nullable=False)
@@ -24,7 +30,7 @@ class Client(Base):
 
     __table_args__ = (
         UniqueConstraint("client_key", name="uq_client_key"),
-        UniqueConstraint("cnpj", name="uq_client_cnpj"),
+        UniqueConstraint("document_number", name="uq_client_document"),
         UniqueConstraint("email", name="uq_client_email"),
     )
 
@@ -34,3 +40,6 @@ class Client(Base):
         order_by="asc(LegalRepresentative.id)",
     )
     account = relationship("Account", back_populates="client", uselist=False)
+
+    PF = "PF"
+    PJ = "PJ"
