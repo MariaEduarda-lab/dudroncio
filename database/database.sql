@@ -1,27 +1,51 @@
 CREATE TABLE client(
     id                              BIGSERIAL PRIMARY KEY,
-    client_key                      CHAR(36) NOT NULL,
-    cnpj                            VARCHAR(14) NOT NULL,
-    legal_name                      VARCHAR(255) NOT NULL,
+    client_key                      UUID NOT NULL,
+    person_type                     VARCHAR(2) NOT NULL,
+    document_number                 VARCHAR(14) NOT NULL,
+    full_name                       VARCHAR(255),
+    birthdate                       DATE,
+    password_hash                   VARCHAR(255),
+    legal_name                      VARCHAR(255),
     trade_name                      VARCHAR(255),
-    client_type                     VARCHAR(10) NOT NULL,
-    cnpj_status                     VARCHAR(30) NOT NULL,
-    primary_activity                VARCHAR(255) NOT NULL,
-    monthly_revenue_cents           BIGINT NOT NULL,
+    cnpj_status                     VARCHAR(30),
+    primary_activity                VARCHAR(255),
+    monthly_income_cents            BIGINT NOT NULL,
     email                           VARCHAR(255) NOT NULL,
     phone_number                    VARCHAR(16) NOT NULL,
     address                         JSONB NOT NULL,
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
     CONSTRAINT uq_client_key UNIQUE(client_key),
-    CONSTRAINT uq_client_cnpj UNIQUE(cnpj),
+    CONSTRAINT uq_client_document UNIQUE(document_number),
     CONSTRAINT uq_client_email UNIQUE(email),
-    CONSTRAINT ck_client_type CHECK (client_type IN ('MEI', 'PJ')),
-    CONSTRAINT ck_client_monthly_revenue CHECK (monthly_revenue_cents >= 0)
+    CONSTRAINT ck_client_person_type CHECK (person_type IN ('PF', 'PJ')),
+    -- CPF com 11 digitos na PF; CNPJ com 12 caracteres [A-Z0-9] e 2
+    -- digitos na PJ. Os digitos verificadores sao conferidos no codigo.
+    CONSTRAINT ck_client_document CHECK (
+        (person_type = 'PF' AND document_number ~ '^[0-9]{11}$')
+        OR (person_type = 'PJ' AND document_number ~ '^[A-Z0-9]{12}[0-9]{2}$')
+    ),
+    -- Cada tipo so tem os proprios campos: a PF nao tem dados de empresa
+    -- e a PJ nao tem senha (quem entra e o representante).
+    CONSTRAINT ck_client_pf_fields CHECK (
+        person_type <> 'PF' OR (
+            full_name IS NOT NULL AND birthdate IS NOT NULL AND password_hash IS NOT NULL
+            AND legal_name IS NULL AND trade_name IS NULL AND cnpj_status IS NULL AND primary_activity IS NULL
+        )
+    ),
+    CONSTRAINT ck_client_pj_fields CHECK (
+        person_type <> 'PJ' OR (
+            legal_name IS NOT NULL AND cnpj_status IS NOT NULL AND primary_activity IS NOT NULL
+            AND full_name IS NULL AND birthdate IS NULL AND password_hash IS NULL
+        )
+    ),
+    CONSTRAINT ck_client_monthly_income CHECK (monthly_income_cents >= 0),
+    CONSTRAINT ck_client_email_lowercase CHECK (email = LOWER(email))
 );
 
 CREATE TABLE legal_representative(
     id                              BIGSERIAL PRIMARY KEY,
-    representative_key              CHAR(36) NOT NULL,
+    representative_key              UUID NOT NULL,
     client_id                       BIGINT NOT NULL REFERENCES client(id),
     cpf                             CHAR(11) NOT NULL,
     full_name                       VARCHAR(255) NOT NULL,
@@ -33,7 +57,9 @@ CREATE TABLE legal_representative(
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
     CONSTRAINT uq_legal_representative_key UNIQUE(representative_key),
     CONSTRAINT uq_legal_representative_cpf UNIQUE(cpf),
-    CONSTRAINT uq_legal_representative_email UNIQUE(email)
+    CONSTRAINT uq_legal_representative_email UNIQUE(email),
+    CONSTRAINT ck_legal_representative_cpf CHECK (cpf ~ '^[0-9]{11}$'),
+    CONSTRAINT ck_legal_representative_email_lowercase CHECK (email = LOWER(email))
 );
 
 CREATE TABLE account(

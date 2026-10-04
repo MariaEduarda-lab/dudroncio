@@ -10,7 +10,7 @@ class AccountDTO:
     def obj_to_dict(account: Account) -> dict:
         return {
             "account_key": str(account.account_key),
-            "client_key": account.client.client_key,
+            "client_key": str(account.client.client_key),
             "branch": account.branch,
             "account_number": account.account_number,
             "check_digit": account.check_digit,
