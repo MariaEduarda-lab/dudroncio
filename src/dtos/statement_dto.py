@@ -35,7 +35,9 @@ class StatementDTO:
             "direction": movement.direction,
             "movement_type": movement.movement_type,
             "description": description,
-            "amount_cents": movement.amount_cents,
+            # No banco o valor e positivo e a direcao evita ambiguidade.
+            # No extrato, debitos aparecem com sinal negativo para leitura.
+            "amount_cents": StatementDTO._signed_amount(movement),
             "balance_after_cents": movement.balance_after_cents,
             "transaction_key": str(transaction.transaction_key),
             "counterparty_name": counterparty_name,
@@ -47,3 +49,9 @@ class StatementDTO:
             return transaction.counterparty_name
         sender = transaction.source_account.client
         return sender.full_name if sender.person_type == Client.PF else sender.legal_name
+
+    @staticmethod
+    def _signed_amount(movement: AccountMovement) -> int:
+        if movement.direction == AccountMovement.DEBIT:
+            return -movement.amount_cents
+        return movement.amount_cents

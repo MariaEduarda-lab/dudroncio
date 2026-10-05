@@ -118,7 +118,7 @@ class TestStatementLines:
         receive_ted(account, 500)
 
         entries = statement(account)["movements"]
-        assert [entry["amount_cents"] for entry in entries] == [500, 3000, 10000]
+        assert [entry["amount_cents"] for entry in entries] == [500, -3000, 10000]
         assert [entry["direction"] for entry in entries] == ["CREDIT", "DEBIT", "CREDIT"]
         assert [entry["balance_after_cents"] for entry in entries] == [7500, 7000, 10000]
 
@@ -136,12 +136,12 @@ class TestStatementLines:
         assert fee["movement_type"] == "FEE"
         assert fee["direction"] == "DEBIT"
         assert fee["description"] == "Tarifa de Pix"
-        assert fee["amount_cents"] == PIX_FEE
+        assert fee["amount_cents"] == -PIX_FEE
         assert fee["counterparty_name"] is None
         assert value["movement_type"] == "PRINCIPAL"
         assert value["direction"] == "DEBIT"
         assert value["description"] == "Pix para Ana Souza"
-        assert value["amount_cents"] == 50000
+        assert value["amount_cents"] == -50000
         assert fee["transaction_key"] == value["transaction_key"] == transaction["transaction_key"]
         assert value["balance_after_cents"] == fee["balance_after_cents"] + PIX_FEE
         assert fee["balance_after_cents"] == balance_of(company)
@@ -179,7 +179,7 @@ class TestStatementLines:
 
         fee, value = statement(company, limit=2)["movements"]
         assert fee["description"] == "Tarifa de TED"
-        assert fee["amount_cents"] == TED_FEE
+        assert fee["amount_cents"] == -TED_FEE
         assert value["description"] == "TED para Ana Souza"
 
     def test_pix_to_another_bank_shows_the_name_given_by_the_central_bank(self):
@@ -191,7 +191,7 @@ class TestStatementLines:
 
         [entry] = statement(person, limit=1)["movements"]
         assert entry["description"] == "Pix para Carlos Lima"
-        assert entry["amount_cents"] == 4000
+        assert entry["amount_cents"] == -4000
         assert entry["direction"] == "DEBIT"
 
     def test_refused_requests_do_not_appear(self):
@@ -304,7 +304,6 @@ class TestStatementProvesTheBalance:
             entries = list(reversed(all_entries(account)))
             balance = 0
             for entry in entries:
-                signed_amount = entry["amount_cents"] if entry["direction"] == "CREDIT" else -entry["amount_cents"]
-                balance += signed_amount
+                balance += entry["amount_cents"]
                 assert entry["balance_after_cents"] == balance
             assert balance == balance_of(account)
