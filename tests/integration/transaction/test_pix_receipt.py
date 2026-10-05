@@ -41,14 +41,21 @@ class TestPixReceipt:
         assert set(transaction) == {
             "transaction_key",
             "type",
+            "direction",
             "amount_cents",
             "fee_cents",
+            "status",
+            "status_reason",
             "account_key",
             "pix_key",
             "payer",
             "created_at",
+            "updated_at",
+            "completed_at",
         }
-        assert transaction["type"] == "PIX_IN"
+        assert transaction["type"] == "PIX"
+        assert transaction["direction"] == "IN"
+        assert transaction["status"] == "COMPLETED"
         assert transaction["amount_cents"] == 15000
         assert transaction["fee_cents"] == 0
         assert transaction["account_key"] == account["account_key"]

@@ -20,14 +20,13 @@ from errors import (
     ReusedTransactionReference,
     TransferToSameAccount,
 )
-from models import Account, Client, Entry, Transaction
-from repositories import AccountRepository, ClientRepository, FeeRepository, TransactionRepository
-from utils.fee import calculate_fee_cents, month_start_brt
+from models import Account, AccountMovement, Client, Transaction
+from repositories import AccountRepository, ClientRepository, TariffRuleRepository, TransactionRepository
+from utils.tariff import calculate_tariff_cents, month_start_brt
 from utils.pix_key import normalize_pix_key
 from utils.schema_handler import matches_schema
 
 IDEMPOTENCY_KEY_PATTERN = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
-SEND_TYPES = {"PIX": Transaction.PIX_OUT, "TED": Transaction.TED_OUT}
 CONFIRMATION_SCHEMA = "central_bank_confirmation.json"
 
 
@@ -36,7 +35,7 @@ class TransactionController(BaseController):
         super().__init__(__name__)
         self.account_repository = AccountRepository(self.context)
         self.client_repository = ClientRepository(self.context)
-        self.fee_repository = FeeRepository(self.context)
+        self.tariff_rule_repository = TariffRuleRepository(self.context)
         self.central_bank_connector = CentralBankConnector()
         self.transaction_repository = TransactionRepository(self.context)
 
@@ -56,13 +55,15 @@ class TransactionController(BaseController):
             raise NotFoundAccount(account_key)
 
         request = self._normalized_send(send_data)
-        request_hash = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
+        request_fingerprint = hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest()
         outgoing = {
-            "type": SEND_TYPES[send_data["type"]],
+            "type": send_data["type"],
             "amount_cents": request["amount_cents"],
             "source_account_id": source.id,
+            "requested_by_client_id": source.client_id,
+            "requested_by_representative_id": self._representative_id(source),
             "idempotency_key": idempotency_key,
-            "request_hash": request_hash,
+            "request_fingerprint": request_fingerprint,
             "pix_key": request.get("pix_key"),
         }
 
@@ -70,7 +71,7 @@ class TransactionController(BaseController):
         # destino tenha mudado de estado depois (TRA-12).
         existing = self.transaction_repository.get_by_idempotency_key(source.id, idempotency_key)
         if existing is not None:
-            return self._repeated_send(existing, request_hash)
+            return self._repeated_send(existing, request_fingerprint)
 
         destination = self._find_our_destination(request)
         if destination is None:
@@ -87,12 +88,12 @@ class TransactionController(BaseController):
             self.session.rollback()
             raise AccountNotActive()
 
-        fee_cents, fee_rule_id = self._fee_for(source, outgoing["type"])
+        fee_cents, tariff_rule_id = self._tariff_for(source, outgoing["type"], Transaction.OUT)
         transaction = self.transaction_repository.create_outgoing(
             {
                 **outgoing,
                 "fee_cents": fee_cents,
-                "fee_rule_id": fee_rule_id,
+                "tariff_rule_id": tariff_rule_id,
                 "destination_account_id": destination.id,
                 **self._counterparty_of(destination),
             }
@@ -104,8 +105,13 @@ class TransactionController(BaseController):
 
         # A tarifa ainda nao entra em conta nenhuma: a conta do banco esta adiada.
         destination_balance = self.account_repository.credit(destination.id, transaction.amount_cents)
-        self.transaction_repository.create_entry(
-            destination.id, transaction, Entry.VALUE, transaction.amount_cents, destination_balance
+        self.transaction_repository.create_movement(
+            destination.id,
+            transaction,
+            AccountMovement.CREDIT,
+            AccountMovement.PRINCIPAL,
+            transaction.amount_cents,
+            destination_balance,
         )
         return self._commit_created(transaction)
 
@@ -120,7 +126,7 @@ class TransactionController(BaseController):
             self.session.rollback()
             raise AccountNotActive()
 
-        fee_cents, fee_rule_id = self._fee_for(source, outgoing["type"])
+        fee_cents, tariff_rule_id = self._tariff_for(source, outgoing["type"], Transaction.OUT)
         balance_after = self.account_repository.debit(source.id, outgoing["amount_cents"] + fee_cents)
         if balance_after is None:
             self.session.rollback()
@@ -133,7 +139,7 @@ class TransactionController(BaseController):
                 **outgoing,
                 "transaction_key": transaction_key,
                 "fee_cents": fee_cents,
-                "fee_rule_id": fee_rule_id,
+                "tariff_rule_id": tariff_rule_id,
                 "counterparty_name": recipient["name"],
                 "counterparty_document": recipient["document"],
                 "counterparty_bank_code": recipient["bank_code"],
@@ -177,7 +183,7 @@ class TransactionController(BaseController):
         # Outro pedido com a mesma chave terminou enquanto este esperava a trava.
         self.session.rollback()
         existing = self.transaction_repository.get_by_idempotency_key(source.id, outgoing["idempotency_key"])
-        return self._repeated_send(existing, outgoing["request_hash"])
+        return self._repeated_send(existing, outgoing["request_fingerprint"])
 
     def _debit_with_entries(self, source: Account, transaction: Transaction) -> None:
         balance_after = self.account_repository.debit(source.id, transaction.amount_cents + transaction.fee_cents)
@@ -189,12 +195,22 @@ class TransactionController(BaseController):
     def _create_debit_entries(self, source: Account, transaction: Transaction, balance_after: int) -> None:
         # Um UPDATE so na origem (valor + tarifa) e dois lancamentos: o do
         # valor com o saldo antes da tarifa, o da tarifa com o saldo final.
-        self.transaction_repository.create_entry(
-            source.id, transaction, Entry.VALUE, -transaction.amount_cents, balance_after + transaction.fee_cents
+        self.transaction_repository.create_movement(
+            source.id,
+            transaction,
+            AccountMovement.DEBIT,
+            AccountMovement.PRINCIPAL,
+            transaction.amount_cents,
+            balance_after + transaction.fee_cents,
         )
         if transaction.fee_cents > 0:
-            self.transaction_repository.create_entry(
-                source.id, transaction, Entry.FEE, -transaction.fee_cents, balance_after
+            self.transaction_repository.create_movement(
+                source.id,
+                transaction,
+                AccountMovement.DEBIT,
+                AccountMovement.FEE,
+                transaction.fee_cents,
+                balance_after,
             )
 
     def _commit_created(self, transaction: Transaction) -> tuple[dict, bool]:
@@ -228,7 +244,7 @@ class TransactionController(BaseController):
         if account is None:
             raise NotFoundRecipientAccount()
 
-        return self._receive(Transaction.TED_IN, account, ted_data)
+        return self._receive(Transaction.TED, account, ted_data)
 
     def receive_pix(self, pix_data: dict) -> tuple[dict, bool]:
         """Credita um Pix que chegou de outro banco, encontrando a conta pela chave.
@@ -241,7 +257,7 @@ class TransactionController(BaseController):
         if client is None or client.account is None:
             raise NotFoundPixKey()
 
-        return self._receive(Transaction.PIX_IN, client.account, pix_data, pix_key)
+        return self._receive(Transaction.PIX, client.account, pix_data, pix_key)
 
     @staticmethod
     def _normalized_send(send_data: dict) -> dict:
@@ -278,19 +294,25 @@ class TransactionController(BaseController):
             raise NotFoundRecipientAccount()
         return account
 
-    def _fee_for(self, source: Account, transaction_type: str) -> tuple[int, int | None]:
-        """Tarifa do envio, contada com a conta de origem ja travada (TAR-07)."""
+    def _tariff_for(self, account: Account, transaction_type: str, direction: str) -> tuple[int, int]:
+        """Tarifa vigente, com a cota contada sob trava para saídas."""
         now = datetime.now(timezone.utc)
-        person_type = source.client.person_type
-        rule = self.fee_repository.get_current_rule(person_type, transaction_type, now)
-        sends_this_month = self.transaction_repository.count_completed_sends(
-            source.id, transaction_type, month_start_brt(now)
+        person_type = account.client.person_type
+        rule = self.tariff_rule_repository.get_current_rule(
+            person_type, transaction_type, direction, now
         )
-        fee_cents = calculate_fee_cents(person_type, transaction_type, sends_this_month, rule)
-        return fee_cents, rule.id if rule is not None else None
+        completed_this_month = 0
+        if direction == Transaction.OUT:
+            completed_this_month = self.transaction_repository.count_completed_sends(
+                account.id, transaction_type, month_start_brt(now)
+            )
+        tariff_cents = calculate_tariff_cents(
+            person_type, transaction_type, direction, completed_this_month, rule
+        )
+        return tariff_cents, rule.id
 
-    def _repeated_send(self, existing: Transaction, request_hash: str) -> tuple[dict, bool]:
-        if existing.request_hash != request_hash:
+    def _repeated_send(self, existing: Transaction, request_fingerprint: str) -> tuple[dict, bool]:
+        if existing.request_fingerprint != request_fingerprint:
             self.session.rollback()
             raise ReusedTransactionReference()
         response = TransactionDTO.obj_to_dict(existing)
@@ -300,7 +322,10 @@ class TransactionController(BaseController):
     def _receive(
         self, transaction_type: str, account: Account, notice: dict, pix_key: str | None = None
     ) -> tuple[dict, bool]:
-        transaction = self.transaction_repository.create_incoming(transaction_type, account, notice, pix_key)
+        _, tariff_rule_id = self._tariff_for(account, transaction_type, Transaction.IN)
+        transaction = self.transaction_repository.create_incoming(
+            transaction_type, account, notice, tariff_rule_id, pix_key
+        )
         if transaction is None:
             existing = self.transaction_repository.get_incoming(
                 transaction_type, notice["payer"]["bank_code"], notice["external_id"]
@@ -321,8 +346,13 @@ class TransactionController(BaseController):
             self.session.rollback()
             raise AccountNotActive()
 
-        self.transaction_repository.create_entry(
-            account.id, transaction, Entry.VALUE, transaction.amount_cents, balance_after
+        self.transaction_repository.create_movement(
+            account.id,
+            transaction,
+            AccountMovement.CREDIT,
+            AccountMovement.PRINCIPAL,
+            transaction.amount_cents,
+            balance_after,
         )
         self.session.flush()
 
@@ -342,3 +372,11 @@ class TransactionController(BaseController):
             and transaction.counterparty_branch == payer["branch"]
             and transaction.counterparty_account_number == payer["account_number"]
         )
+
+    @staticmethod
+    def _representative_id(account: Account) -> int | None:
+        if account.client.person_type == Client.PF:
+            return None
+        # O contrato atual autentica o serviço e cadastra um representante.
+        # Com identidade de usuário, este id deverá vir do token autenticado.
+        return account.client.legal_representatives[0].id

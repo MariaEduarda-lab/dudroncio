@@ -196,15 +196,15 @@ class InvalidBirthdate(QIException):
         )
 
 
-class MissingFeeRule(QIException):
+class MissingTariffRule(QIException):
     code = "QIT005001"
 
-    def __init__(self, person_type, transaction_type) -> None:
+    def __init__(self, person_type, transaction_type, direction) -> None:
         super().__init__(
-            "Fee rule not found",
+            "Tariff rule not found",
             self.code,
             500,
-            f"There is no fee rule in force for {person_type} {transaction_type}.",
+            f"There is no tariff rule in force for {person_type} {transaction_type} {direction}.",
             "Não há tarifa vigente para esta operação.",
         )
 

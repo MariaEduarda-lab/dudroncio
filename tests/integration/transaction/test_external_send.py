@@ -73,7 +73,9 @@ class TestExternalPix:
 
         status, transaction = send(sender, PayloadGenerator.create_pix_send_payload(pix_key, 10000))
         assert status == 201
-        assert transaction["type"] == "PIX_OUT"
+        assert transaction["type"] == "PIX"
+        assert transaction["direction"] == "OUT"
+        assert transaction["status"] == "COMPLETED"
         assert transaction["amount_cents"] == 10000
         assert transaction["fee_cents"] == 0
         assert transaction["pix_key"] == pix_key
@@ -205,7 +207,9 @@ class TestExternalTed:
 
         status, transaction = send(sender, external_ted(account, 30000))
         assert status == 201
-        assert transaction["type"] == "TED_OUT"
+        assert transaction["type"] == "TED"
+        assert transaction["direction"] == "OUT"
+        assert transaction["status"] == "COMPLETED"
         assert transaction["recipient"]["bank_code"] == "237"
         assert "pix_key" not in transaction
         assert balance_of(sender) == 20000

@@ -5,23 +5,28 @@ from sqlalchemy.orm import relationship
 from models.base import Base
 
 
-class Entry(Base):
-    """Lancamento: uma mudanca de saldo, com o saldo que ficou depois dela."""
+class AccountMovement(Base):
+    """Efeito financeiro imutável de uma transação sobre uma conta."""
 
-    __tablename__ = "entry"
+    __tablename__ = "account_movement"
 
     id = Column(BigInteger, primary_key=True)
-    entry_key = Column(UUID(as_uuid=True), nullable=False)
+    movement_key = Column(UUID(as_uuid=True), nullable=False)
     account_id = Column(BigInteger, ForeignKey("account.id"), nullable=False)
     transaction_id = Column(BigInteger, ForeignKey("transaction.id"), nullable=False)
-    entry_type = Column(String(10), nullable=False)
+    direction = Column(String(10), nullable=False)
+    movement_type = Column(String(10), nullable=False)
     amount_cents = Column(BigInteger, nullable=False)
     balance_after_cents = Column(BigInteger, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
-    __table_args__ = (UniqueConstraint("entry_key", name="uq_entry_key"),)
+    __table_args__ = (UniqueConstraint("movement_key", name="uq_account_movement_key"),)
 
-    transaction = relationship("Transaction")
+    account = relationship("Account", back_populates="account_movements")
+    transaction = relationship("Transaction", back_populates="account_movements")
 
-    VALUE = "VALUE"
+    DEBIT = "DEBIT"
+    CREDIT = "CREDIT"
+    PRINCIPAL = "PRINCIPAL"
     FEE = "FEE"
+    REVERSAL = "REVERSAL"

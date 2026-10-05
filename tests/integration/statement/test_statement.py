@@ -11,10 +11,11 @@ from tests.utils import CentralBankMock, PayloadGenerator, RequestGenerator
 
 PIX_FEE = 99
 TED_FEE = 499
-ENTRY_FIELDS = {
-    "entry_key",
+MOVEMENT_FIELDS = {
+    "movement_key",
     "created_at",
-    "type",
+    "direction",
+    "movement_type",
     "description",
     "amount_cents",
     "balance_after_cents",
@@ -66,7 +67,7 @@ def all_entries(account: dict, limit: int = 3) -> list:
     while True:
         params = {"limit": limit} if cursor is None else {"limit": limit, "after": cursor}
         page = statement(account, **params)
-        entries += page["entries"]
+        entries += page["movements"]
         cursor = page["next_cursor"]
         if cursor is None:
             return entries
@@ -82,15 +83,16 @@ class TestStatementLines:
     def test_new_account_has_an_empty_statement(self):
         account = create_pf_account()
 
-        assert statement(account) == {"entries": [], "next_cursor": None}
+        assert statement(account) == {"movements": [], "next_cursor": None}
 
     def test_received_ted_shows_who_paid(self):
         account = create_pf_account()
         receive_ted(account, 30000)
 
-        [entry] = statement(account)["entries"]
-        assert set(entry) == ENTRY_FIELDS
-        assert entry["type"] == "VALUE"
+        [entry] = statement(account)["movements"]
+        assert set(entry) == MOVEMENT_FIELDS
+        assert entry["direction"] == "CREDIT"
+        assert entry["movement_type"] == "PRINCIPAL"
         assert entry["description"] == "TED recebida de Carlos Pereira"
         assert entry["counterparty_name"] == "Carlos Pereira"
         assert entry["amount_cents"] == 30000
@@ -104,7 +106,7 @@ class TestStatementLines:
         )
         assert status == 201
 
-        [entry] = statement(account)["entries"]
+        [entry] = statement(account)["movements"]
         assert entry["description"] == "Pix recebido de Carlos Pereira"
         assert entry["transaction_key"] == transaction["transaction_key"]
 
@@ -115,8 +117,9 @@ class TestStatementLines:
         pix(account, recipient["email"], 3000)
         receive_ted(account, 500)
 
-        entries = statement(account)["entries"]
-        assert [entry["amount_cents"] for entry in entries] == [500, -3000, 10000]
+        entries = statement(account)["movements"]
+        assert [entry["amount_cents"] for entry in entries] == [500, 3000, 10000]
+        assert [entry["direction"] for entry in entries] == ["CREDIT", "DEBIT", "CREDIT"]
         assert [entry["balance_after_cents"] for entry in entries] == [7500, 7000, 10000]
 
     def test_fee_is_a_separate_line_above_the_value(self):
@@ -129,14 +132,16 @@ class TestStatementLines:
         status, transaction = pix(company, recipient["email"], 50000)
         assert status == 201
 
-        fee, value = statement(company, limit=2)["entries"]
-        assert fee["type"] == "FEE"
+        fee, value = statement(company, limit=2)["movements"]
+        assert fee["movement_type"] == "FEE"
+        assert fee["direction"] == "DEBIT"
         assert fee["description"] == "Tarifa de Pix"
-        assert fee["amount_cents"] == -PIX_FEE
+        assert fee["amount_cents"] == PIX_FEE
         assert fee["counterparty_name"] is None
-        assert value["type"] == "VALUE"
+        assert value["movement_type"] == "PRINCIPAL"
+        assert value["direction"] == "DEBIT"
         assert value["description"] == "Pix para Ana Souza"
-        assert value["amount_cents"] == -50000
+        assert value["amount_cents"] == 50000
         assert fee["transaction_key"] == value["transaction_key"] == transaction["transaction_key"]
         assert value["balance_after_cents"] == fee["balance_after_cents"] + PIX_FEE
         assert fee["balance_after_cents"] == balance_of(company)
@@ -147,8 +152,8 @@ class TestStatementLines:
         receive_ted(person, 10000)
         pix(person, recipient["email"], 1000)
 
-        entries = statement(person)["entries"]
-        assert [entry["type"] for entry in entries] == ["VALUE", "VALUE"]
+        entries = statement(person)["movements"]
+        assert [entry["movement_type"] for entry in entries] == ["PRINCIPAL", "PRINCIPAL"]
 
     def test_internal_transfer_shows_each_side_the_other_name(self):
         company = create_pj_account()
@@ -156,8 +161,8 @@ class TestStatementLines:
         receive_ted(company, 10000)
         pix(company, person["email"], 2500)
 
-        [sent] = statement(company, limit=1)["entries"]
-        [received] = statement(person)["entries"]
+        [sent] = statement(company, limit=1)["movements"]
+        [received] = statement(person)["movements"]
         assert sent["description"] == "Pix para Ana Souza"
         assert received["description"] == "Pix recebido de Empresa Exemplo Tecnologia Ltda"
         assert received["counterparty_name"] == "Empresa Exemplo Tecnologia Ltda"
@@ -172,9 +177,9 @@ class TestStatementLines:
         for _ in range(3):
             RequestGenerator.POST_transaction(company["account_key"], ted, str(uuid4()))
 
-        fee, value = statement(company, limit=2)["entries"]
+        fee, value = statement(company, limit=2)["movements"]
         assert fee["description"] == "Tarifa de TED"
-        assert fee["amount_cents"] == -TED_FEE
+        assert fee["amount_cents"] == TED_FEE
         assert value["description"] == "TED para Ana Souza"
 
     def test_pix_to_another_bank_shows_the_name_given_by_the_central_bank(self):
@@ -184,9 +189,10 @@ class TestStatementLines:
         CentralBankMock.answer_pix(pix_key, 200, CentralBankMock.confirmation(name="Carlos Lima"))
         pix(person, pix_key, 4000)
 
-        [entry] = statement(person, limit=1)["entries"]
+        [entry] = statement(person, limit=1)["movements"]
         assert entry["description"] == "Pix para Carlos Lima"
-        assert entry["amount_cents"] == -4000
+        assert entry["amount_cents"] == 4000
+        assert entry["direction"] == "DEBIT"
 
     def test_refused_requests_do_not_appear(self):
         person = create_pf_account()
@@ -196,7 +202,7 @@ class TestStatementLines:
         status, _ = pix(person, recipient["email"], 5000)
         assert status == 422
 
-        assert len(statement(person)["entries"]) == 1
+        assert len(statement(person)["movements"]) == 1
 
 
 class TestStatementPages:
@@ -209,7 +215,7 @@ class TestStatementPages:
         second = statement(account, limit=2, after=first["next_cursor"])
         third = statement(account, limit=2, after=second["next_cursor"])
 
-        amounts = [[entry["amount_cents"] for entry in page["entries"]] for page in (first, second, third)]
+        amounts = [[entry["amount_cents"] for entry in page["movements"]] for page in (first, second, third)]
         assert amounts == [[500, 400], [300, 200], [100]]
         assert third["next_cursor"] is None
 
@@ -222,9 +228,9 @@ class TestStatementPages:
             pix(company, recipient["email"], 10)
 
         page = statement(company)
-        assert len(page["entries"]) == 50
-        assert page["next_cursor"] == page["entries"][-1]["entry_key"]
-        assert len(statement(company, after=page["next_cursor"])["entries"]) == 11
+        assert len(page["movements"]) == 50
+        assert page["next_cursor"] == page["movements"][-1]["movement_key"]
+        assert len(statement(company, after=page["next_cursor"])["movements"]) == 11
 
     def test_new_movement_does_not_shift_the_next_page(self):
         account = create_pf_account()
@@ -235,13 +241,13 @@ class TestStatementPages:
         receive_ted(account, 999)
 
         second = statement(account, limit=2, after=first["next_cursor"])
-        assert [entry["amount_cents"] for entry in second["entries"]] == [200, 100]
+        assert [entry["amount_cents"] for entry in second["movements"]] == [200, 100]
 
     def test_cursor_from_another_account_is_refused(self):
         account = create_pf_account()
         other = create_pf_account()
         receive_ted(other, 100)
-        other_entry = statement(other)["entries"][0]["entry_key"]
+        other_entry = statement(other)["movements"][0]["movement_key"]
 
         status, response = RequestGenerator.GET_statement(account["account_key"], {"after": other_entry})
         assert status == 422
@@ -271,7 +277,7 @@ class TestStatementPages:
         account = create_pf_account()
         receive_ted(account, 100)
 
-        assert len(statement(account, limit=100)["entries"]) == 1
+        assert len(statement(account, limit=100)["movements"]) == 1
 
     def test_unknown_account(self):
         status, response = RequestGenerator.GET_statement(str(uuid4()))
@@ -298,6 +304,7 @@ class TestStatementProvesTheBalance:
             entries = list(reversed(all_entries(account)))
             balance = 0
             for entry in entries:
-                balance += entry["amount_cents"]
+                signed_amount = entry["amount_cents"] if entry["direction"] == "CREDIT" else -entry["amount_cents"]
+                balance += signed_amount
                 assert entry["balance_after_cents"] == balance
             assert balance == balance_of(account)
