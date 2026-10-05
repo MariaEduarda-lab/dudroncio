@@ -39,9 +39,6 @@ Um único cadastro de `client`, discriminado por `person_type`, guarda os campos
 | `GET` | `/accounts/{account_key}/transactions` | Retorna extrato por período | `created_from`, `created_to`, `limit`, `page` | `200` com saldos e lançamentos; `400` período ou paginação inválidos; `404` conta inexistente. Idempotente por ser leitura. |
 
 ### Banco de Dados (Somente diagrama)
-# Modelo de dados — v2
-
-Diagrama no formato pedido pela seção "Banco de Dados (Somente diagrama)" do RFC. Os campos de tipo enumerado aparecem como `enum`, com os valores possíveis no comentário.
 
 ```mermaid
 erDiagram
@@ -76,7 +73,7 @@ erDiagram
         timestamptz updated_at
     }
 
-    REPRESENTANTE_LEGAL {
+    LEGAL_REPRESENTATIVE {
         bigint id PK "interno"
         uuid representative_key UK "publico"
         bigint client_id FK
@@ -130,7 +127,7 @@ erDiagram
         timestamptz completed_at "indice com origem tipo status"
     }
 
-    HISTORICO_STATUS_TRANSACAO {
+    ACCOUNT_MOVEMENT {
         bigint id PK
         bigint account_id FK
         bigint transaction_id FK
@@ -162,6 +159,7 @@ erDiagram
         timestamptz analyzed_at
     }
 ```
+
 ### Fluxos
 
 **Cadastro de cliente — caminho feliz**
