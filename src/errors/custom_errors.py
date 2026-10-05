@@ -324,3 +324,16 @@ class CentralBankUnavailable(QIException):
             "The Central Bank did not confirm the transfer in time. Nothing was changed; try again.",
             "O Banco Central não confirmou o envio a tempo. Nada foi alterado; tente de novo.",
         )
+
+
+class InvalidStatementCursor(QIException):
+    code = "QIT006001"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Invalid statement cursor",
+            self.code,
+            422,
+            "The cursor does not identify a line of this account statement.",
+            "O cursor não identifica uma linha do extrato desta conta.",
+        )

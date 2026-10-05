@@ -315,3 +315,7 @@ CREATE TRIGGER tg_transaction_append_only
 CREATE TRIGGER tg_entry_append_only
     BEFORE UPDATE OR DELETE ON entry
     FOR EACH ROW EXECUTE FUNCTION append_only();
+
+-- Extrato: lancamentos de uma conta, do mais recente para o mais antigo,
+-- em paginas que continuam a partir do id da ultima linha vista.
+CREATE INDEX ix_entry_statement ON entry (account_id, id DESC);

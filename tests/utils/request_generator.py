@@ -90,3 +90,13 @@ class RequestGenerator:
             headers=headers,
         )
         return response.response_status, response.response_json
+
+    @staticmethod
+    def GET_statement(account_key: str, query_params: dict = None) -> BaseConnectorResponse:
+        response = ClientRequisition.send(
+            "GET",
+            f"/accounts/{account_key}/statement",
+            headers={"INTERNAL-TOKEN": INTERNAL_TOKEN},
+            query_params=query_params,
+        )
+        return response.response_status, response.response_json
