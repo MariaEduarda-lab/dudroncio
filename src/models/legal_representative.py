@@ -19,6 +19,7 @@ class LegalRepresentative(Base):
     role = Column(String(100), nullable=False)
     password_hash = Column(String(255), nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
         UniqueConstraint("representative_key", name="uq_legal_representative_key"),

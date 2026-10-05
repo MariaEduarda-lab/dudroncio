@@ -54,6 +54,7 @@ class TestPjClient:
         assert "password_hash" not in client
         assert "full_name" not in client
         assert "birthdate" not in client
+        assert client["updated_at"] == client["created_at"]
 
         representative = client["legal_representatives"][0]
         assert representative["cpf"].startswith("***.***.***-")
@@ -62,6 +63,7 @@ class TestPjClient:
         assert "password_hash" not in representative
         assert "status" not in representative
         assert "id" not in representative
+        assert representative["updated_at"] == representative["created_at"]
 
     def test_refuses_invalid_cnpj_without_exposing_it(self):
         payload = PayloadGenerator.create_client_payload(cnpj="11.111.111/1111-11")
@@ -224,6 +226,7 @@ class TestPfClient:
             "phone_number",
             "address",
             "created_at",
+            "updated_at",
         }
         assert client["client_key"] == response["client_key"]
         assert client["person_type"] == "PF"
@@ -234,6 +237,7 @@ class TestPfClient:
         assert client["email"] == payload["email"]
         assert client["phone_number"] == payload["phone_number"]
         assert client["address"] == payload["address"]
+        assert client["updated_at"] == client["created_at"]
 
     def test_person_opens_account(self):
         status, response = RequestGenerator.POST_client(PayloadGenerator.create_pf_client_payload())

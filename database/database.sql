@@ -15,6 +15,7 @@ CREATE TABLE client(
     phone_number                    VARCHAR(16) NOT NULL,
     address                         JSONB NOT NULL,
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
+    updated_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
     CONSTRAINT uq_client_key UNIQUE(client_key),
     CONSTRAINT uq_client_document UNIQUE(document_number),
     CONSTRAINT uq_client_email UNIQUE(email),
@@ -55,6 +56,7 @@ CREATE TABLE legal_representative(
     role                            VARCHAR(100) NOT NULL,
     password_hash                   VARCHAR(255) NOT NULL,
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
+    updated_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
     CONSTRAINT uq_legal_representative_key UNIQUE(representative_key),
     CONSTRAINT uq_legal_representative_cpf UNIQUE(cpf),
     CONSTRAINT uq_legal_representative_email UNIQUE(email),
@@ -105,6 +107,29 @@ $$;
 CREATE TRIGGER tg_account_protected_columns
     BEFORE UPDATE OR DELETE ON account
     FOR EACH ROW EXECUTE FUNCTION account_protected_columns();
+
+-- updated_at pertence ao estado persistido e deve ser confiavel mesmo
+-- quando uma alteracao nao passa pelo ORM (script operacional, migracao ou
+-- outro servico). O trigger tambem cobre as atualizacoes atomicas de saldo.
+CREATE FUNCTION set_updated_at() RETURNS trigger
+LANGUAGE plpgsql AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER tg_client_set_updated_at
+    BEFORE UPDATE ON client
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER tg_legal_representative_set_updated_at
+    BEFORE UPDATE ON legal_representative
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE TRIGGER tg_account_set_updated_at
+    BEFORE UPDATE ON account
+    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 
 -- CLI-06: um e-mail nao se repete em lugar nenhum do banco, nem entre
