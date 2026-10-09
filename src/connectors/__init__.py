@@ -1,3 +1,2 @@
-from connectors.bankslip_connector import BankSlipConnector
 from connectors.cnpj_registry_connector import CnpjRegistryConnector
 from connectors.central_bank_connector import CentralBankConnector
