@@ -120,6 +120,15 @@ class TransactionController(BaseController):
         devolve o debito: nada foi registrado e a chave segue livre (TRA-18).
         """
         self.account_repository.lock_by_ids([source.id])
+
+        # Um pedido com a mesma chave pode ter terminado enquanto este
+        # esperava a trava. Conferir agora, antes de debitar, evita chamar o
+        # Banco Central de novo: no envio externo nao ha ON CONFLICT antes da
+        # chamada que impeca um segundo pagamento (TRA-12).
+        existing = self.transaction_repository.get_by_idempotency_key(source.id, outgoing["idempotency_key"])
+        if existing is not None:
+            return self._repeated_send(existing, outgoing["request_fingerprint"])
+
         if source.status != Account.ACTIVE:
             self.session.rollback()
             raise AccountNotActive()
