@@ -73,18 +73,13 @@ class TestInternalPix:
             "direction",
             "amount_cents",
             "fee_cents",
-            "status",
-            "status_reason",
             "account_key",
             "pix_key",
             "recipient",
             "created_at",
-            "updated_at",
-            "completed_at",
         }
         assert transaction["type"] == "PIX"
         assert transaction["direction"] == "OUT"
-        assert transaction["status"] == "COMPLETED"
         assert transaction["amount_cents"] == 10000
         assert transaction["fee_cents"] == 0
         assert transaction["account_key"] == sender["account_key"]
@@ -149,17 +144,12 @@ class TestInternalTed:
             "direction",
             "amount_cents",
             "fee_cents",
-            "status",
-            "status_reason",
             "account_key",
             "recipient",
             "created_at",
-            "updated_at",
-            "completed_at",
         }
         assert transaction["type"] == "TED"
         assert transaction["direction"] == "OUT"
-        assert transaction["status"] == "COMPLETED"
         assert transaction["recipient"]["bank_code"] == "999"
         assert transaction["recipient"]["branch"] == recipient["branch"]
         assert balance_of(sender) == 20000

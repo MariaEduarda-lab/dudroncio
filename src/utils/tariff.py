@@ -5,6 +5,9 @@ from errors import MissingTariffRule
 
 BRASILIA = ZoneInfo("America/Sao_Paulo")
 
+PF = "PF"
+IN = "IN"
+
 
 def month_start_brt(at: datetime) -> datetime:
     """Primeiro instante do mês-calendário de Brasília que contém ``at``."""
@@ -22,9 +25,20 @@ def calculate_tariff_cents(
     completed_this_month: int,
     rule,
 ) -> int:
-    """Calcula a tarifa usando exclusivamente a regra explícita vigente."""
+    """Tarifa, em centavos, da operação que está sendo feita agora.
+
+    A regra vigente define a cota e o preço, mas duas garantias não dependem
+    dela: PF nunca paga (TAR-01) e receber é sempre grátis (TAR-02). O banco
+    de dados também recusa uma regra que cobre nesses casos.
+
+    `completed_this_month` são os envios concluídos ANTES deste, do mesmo
+    tipo, no mês de Brasília: o 21º Pix chega com 20. Quem chama já travou a
+    conta e contou na mesma transação do banco (TAR-07).
+    """
     if rule is None:
         raise MissingTariffRule(person_type, transaction_type, direction)
+    if person_type == PF or direction == IN:
+        return 0
     if rule.monthly_free_quota is None:
         return 0
     if completed_this_month < rule.monthly_free_quota:

@@ -37,17 +37,12 @@ class TestTedReceipt:
             "direction",
             "amount_cents",
             "fee_cents",
-            "status",
-            "status_reason",
             "account_key",
             "payer",
             "created_at",
-            "updated_at",
-            "completed_at",
         }
         assert transaction["type"] == "TED"
         assert transaction["direction"] == "IN"
-        assert transaction["status"] == "COMPLETED"
         assert transaction["amount_cents"] == 30000
         assert transaction["fee_cents"] == 0
         assert transaction["account_key"] == account["account_key"]

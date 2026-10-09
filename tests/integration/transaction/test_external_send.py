@@ -75,7 +75,6 @@ class TestExternalPix:
         assert status == 201
         assert transaction["type"] == "PIX"
         assert transaction["direction"] == "OUT"
-        assert transaction["status"] == "COMPLETED"
         assert transaction["amount_cents"] == 10000
         assert transaction["fee_cents"] == 0
         assert transaction["pix_key"] == pix_key
@@ -209,7 +208,6 @@ class TestExternalTed:
         assert status == 201
         assert transaction["type"] == "TED"
         assert transaction["direction"] == "OUT"
-        assert transaction["status"] == "COMPLETED"
         assert transaction["recipient"]["bank_code"] == "237"
         assert "pix_key" not in transaction
         assert balance_of(sender) == 20000

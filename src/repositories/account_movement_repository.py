@@ -13,6 +13,7 @@ class AccountMovementRepository:
         self.session = context.db_session
 
     def get_by_key(self, movement_key: str) -> AccountMovement | None:
+        # Chave em formato invalido nao existe: vira "nao encontrado".
         try:
             parsed_key = UUID(movement_key)
         except ValueError:
@@ -29,6 +30,12 @@ class AccountMovementRepository:
         before_movement_id: int | None,
         limit: int,
     ) -> list[AccountMovement]:
+        """Movimentos da conta, do mais recente para o mais antigo.
+
+        A pagina seguinte comeca abaixo do id da ultima linha vista, e nao
+        num deslocamento: um movimento novo entra no topo e nao empurra as
+        linhas das paginas seguintes (EXT-05).
+        """
         query = (
             self.session.query(AccountMovement)
             .options(

@@ -19,14 +19,12 @@ PJ_PIX_RULE = TariffRule(
 @pytest.mark.parametrize("transaction_type", ["PIX", "TED"])
 def test_receiving_is_free_even_with_a_priced_rule_at_hand(transaction_type):
     # TAR-02: mesmo que quem chama passe uma regra com preço, receber é grátis.
-    free_rule = TariffRule(monthly_free_quota=None, fee_after_quota_cents=0)
-    assert calculate_tariff_cents("PJ", transaction_type, "IN", 500, free_rule) == 0
+    assert calculate_tariff_cents("PJ", transaction_type, "IN", 500, PJ_PIX_RULE) == 0
 
 
 def test_pf_never_pays_even_with_a_priced_rule_at_hand():
     # TAR-01: a regra da PJ nunca vale para PF.
-    free_rule = TariffRule(monthly_free_quota=None, fee_after_quota_cents=0)
-    assert calculate_tariff_cents("PF", "PIX", "OUT", 500, free_rule) == 0
+    assert calculate_tariff_cents("PF", "PIX", "OUT", 500, PJ_PIX_RULE) == 0
 
 
 def test_rule_without_free_quota_charges_the_first_send():

@@ -29,4 +29,3 @@ class AccountMovement(Base):
     CREDIT = "CREDIT"
     PRINCIPAL = "PRINCIPAL"
     FEE = "FEE"
-    REVERSAL = "REVERSAL"

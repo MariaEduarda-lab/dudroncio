@@ -2,6 +2,7 @@ from zoneinfo import ZoneInfo
 
 from models import AccountMovement, Client, Transaction
 
+# O extrato e lido pelo cliente: data e hora no horario de Brasilia.
 BRASILIA = ZoneInfo("America/Sao_Paulo")
 
 
@@ -45,6 +46,13 @@ class StatementDTO:
 
     @staticmethod
     def _counterparty_name(movement: AccountMovement, transaction: Transaction) -> str:
+        """So o nome da outra parte aparece (EXT-10).
+
+        A transacao guarda a outra parte do ponto de vista de quem a
+        originou: quem pagou num recebimento, quem recebeu num envio. No
+        envio entre clientes nossos, o credito e do recebedor, e para ele a
+        outra parte e quem enviou.
+        """
         if transaction.direction == Transaction.IN or movement.direction == AccountMovement.DEBIT:
             return transaction.counterparty_name
         sender = transaction.source_account.client

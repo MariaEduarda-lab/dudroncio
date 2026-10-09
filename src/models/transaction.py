@@ -22,11 +22,6 @@ class Transaction(Base):
     idempotency_key = Column(String(64))
     external_reference = Column(String(64))
     request_fingerprint = Column(CHAR(64))
-    authorization_fingerprint = Column(CHAR(64))
-    authorization_expires_at = Column(DateTime(timezone=True))
-    authorization_method = Column(String(50))
-    status = Column(String(20), nullable=False)
-    status_reason = Column(String(255))
     counterparty_name = Column(String(255), nullable=False)
     counterparty_document = Column(String(14), nullable=False)
     counterparty_bank_code = Column(CHAR(3), nullable=False)
@@ -34,15 +29,6 @@ class Transaction(Base):
     counterparty_account_number = Column(String(20), nullable=False)
     pix_key = Column(String(255))
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    validated_at = Column(DateTime(timezone=True))
-    review_started_at = Column(DateTime(timezone=True))
-    authorized_at = Column(DateTime(timezone=True))
-    processing_at = Column(DateTime(timezone=True))
-    completed_at = Column(DateTime(timezone=True))
-    blocked_at = Column(DateTime(timezone=True))
-    failed_at = Column(DateTime(timezone=True))
-    reversed_at = Column(DateTime(timezone=True))
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (UniqueConstraint("transaction_key", name="uq_transaction_key"),)
 
@@ -51,20 +37,9 @@ class Transaction(Base):
     requested_by_client = relationship("Client", foreign_keys=[requested_by_client_id])
     requested_by_representative = relationship("LegalRepresentative", foreign_keys=[requested_by_representative_id])
     tariff_rule = relationship("TariffRule", back_populates="transactions")
-    risk_analyses = relationship("TransactionRiskAnalysis", back_populates="transaction", order_by="TransactionRiskAnalysis.id")
     account_movements = relationship("AccountMovement", back_populates="transaction", order_by="AccountMovement.id")
 
     PIX = "PIX"
     TED = "TED"
     IN = "IN"
     OUT = "OUT"
-
-    CREATED = "CREATED"
-    VALIDATED = "VALIDATED"
-    UNDER_REVIEW = "UNDER_REVIEW"
-    AUTHORIZED = "AUTHORIZED"
-    PROCESSING = "PROCESSING"
-    COMPLETED = "COMPLETED"
-    BLOCKED = "BLOCKED"
-    FAILED = "FAILED"
-    REVERSED = "REVERSED"

@@ -24,15 +24,15 @@ PJ_TED_RULE = TariffRule(
 @pytest.mark.parametrize("transaction_type,direction", [("PIX", "OUT"), ("TED", "OUT"), ("PIX", "IN"), ("TED", "IN")])
 def test_pf_never_pays(transaction_type, direction):
     # TAR-01: Ana (PF) faz o 30o Pix do mes e nao paga.
-    rule = TariffRule(monthly_free_quota=None, fee_after_quota_cents=0)
-    assert calculate_tariff_cents("PF", transaction_type, direction, 29, rule) == 0
+    # Mesmo que a regra recebida tenha preco, PF nunca paga.
+    assert calculate_tariff_cents("PF", transaction_type, direction, 29, PJ_PIX_RULE) == 0
 
 
 @pytest.mark.parametrize("transaction_type", ["PIX", "TED"])
 def test_receiving_is_always_free(transaction_type):
     # TAR-02: a distribuidora recebe 100 Pix no mes, todos gratis.
-    rule = TariffRule(monthly_free_quota=None, fee_after_quota_cents=0)
-    assert calculate_tariff_cents("PJ", transaction_type, "IN", 100, rule) == 0
+    # Mesmo que a regra recebida tenha preco, receber e gratis.
+    assert calculate_tariff_cents("PJ", transaction_type, "IN", 100, PJ_PIX_RULE) == 0
 
 
 def test_twentieth_pix_is_free():

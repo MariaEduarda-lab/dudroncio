@@ -27,6 +27,7 @@ class StatementController(BaseController):
             before_movement_id = cursor.id
 
         page_size = limit or DEFAULT_PAGE_SIZE
+        # Uma linha a mais so para saber se ha proxima pagina.
         movements = self.account_movement_repository.list_for_statement(
             account.id, before_movement_id, page_size + 1
         )

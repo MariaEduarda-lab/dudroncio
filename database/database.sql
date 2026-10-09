@@ -217,7 +217,12 @@ CREATE TABLE tariff_rule(
     CONSTRAINT ck_tariff_rule_direction CHECK (direction IN ('IN', 'OUT')),
     CONSTRAINT ck_tariff_rule_quota CHECK (monthly_free_quota IS NULL OR monthly_free_quota >= 0),
     CONSTRAINT ck_tariff_rule_fee CHECK (fee_after_quota_cents >= 0),
-    CONSTRAINT ck_tariff_rule_unlimited CHECK (monthly_free_quota IS NOT NULL OR fee_after_quota_cents = 0)
+    CONSTRAINT ck_tariff_rule_unlimited CHECK (monthly_free_quota IS NOT NULL OR fee_after_quota_cents = 0),
+    -- PF nunca paga (TAR-01) e receber e sempre gratis (TAR-02): so o envio
+    -- de PJ pode ter preco, mesmo que alguem cadastre uma regra nova.
+    CONSTRAINT ck_tariff_rule_only_pj_sends_pay CHECK (
+        (person_type = 'PJ' AND direction = 'OUT') OR fee_after_quota_cents = 0
+    )
 );
 
 -- Uma regra de tarifa nunca e editada nem apagada: o que foi cobrado
@@ -267,11 +272,6 @@ CREATE TABLE transaction(
     idempotency_key                 VARCHAR(64),
     external_reference              VARCHAR(64),
     request_fingerprint             CHAR(64),
-    authorization_fingerprint       CHAR(64),
-    authorization_expires_at        TIMESTAMPTZ,
-    authorization_method            VARCHAR(50),
-    status                          VARCHAR(20) NOT NULL,
-    status_reason                   VARCHAR(255),
     counterparty_name               VARCHAR(255) NOT NULL,
     counterparty_document           VARCHAR(14) NOT NULL,
     counterparty_bank_code          CHAR(3) NOT NULL,
@@ -280,21 +280,9 @@ CREATE TABLE transaction(
     -- Chave Pix pela qual o recebimento chegou, ja normalizada.
     pix_key                         VARCHAR(255),
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
-    validated_at                    TIMESTAMPTZ,
-    review_started_at               TIMESTAMPTZ,
-    authorized_at                   TIMESTAMPTZ,
-    processing_at                   TIMESTAMPTZ,
-    completed_at                    TIMESTAMPTZ,
-    blocked_at                      TIMESTAMPTZ,
-    failed_at                       TIMESTAMPTZ,
-    reversed_at                     TIMESTAMPTZ,
-    updated_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
     CONSTRAINT uq_transaction_key UNIQUE(transaction_key),
     CONSTRAINT ck_transaction_type CHECK (type IN ('PIX', 'TED')),
     CONSTRAINT ck_transaction_direction CHECK (direction IN ('IN', 'OUT')),
-    CONSTRAINT ck_transaction_status CHECK (
-        status IN ('CREATED', 'VALIDATED', 'UNDER_REVIEW', 'AUTHORIZED', 'PROCESSING', 'COMPLETED', 'BLOCKED', 'FAILED', 'REVERSED')
-    ),
     CONSTRAINT ck_transaction_amount CHECK (amount_cents BETWEEN 1 AND 100000000000),
     CONSTRAINT ck_transaction_fee CHECK (fee_cents >= 0),
     CONSTRAINT ck_transaction_incoming CHECK (
@@ -314,7 +302,6 @@ CREATE TABLE transaction(
     ),
     CONSTRAINT ck_transaction_not_to_itself CHECK (source_account_id IS DISTINCT FROM destination_account_id),
     CONSTRAINT ck_transaction_pix_key CHECK ((type = 'PIX') = (pix_key IS NOT NULL)),
-    CONSTRAINT ck_transaction_completed_at CHECK (status <> 'COMPLETED' OR completed_at IS NOT NULL),
     -- Um pedido de envio por chave de idempotencia em cada conta de origem.
     CONSTRAINT uq_transaction_idempotency UNIQUE(source_account_id, idempotency_key),
     CONSTRAINT ck_transaction_document CHECK (counterparty_document ~ '^([0-9]{11}|[A-Z0-9]{12}[0-9]{2})$')
@@ -328,9 +315,10 @@ CREATE UNIQUE INDEX ux_transaction_incoming_ref
     WHERE direction = 'IN';
 
 -- Contagem da cota de tarifa: envios de um tipo, de uma conta, no mes.
+-- Uma transacao so existe se deu certo (TRA-09): todo envio gravado conta.
 CREATE INDEX ix_transaction_sends
-    ON transaction (source_account_id, type, direction, completed_at)
-    WHERE direction = 'OUT' AND status = 'COMPLETED';
+    ON transaction (source_account_id, type, created_at)
+    WHERE direction = 'OUT';
 
 -- O solicitante precisa ser o titular da conta. Para PJ, o representante
 -- informado também precisa pertencer àquele cliente; para PF ele não existe.
@@ -378,19 +366,6 @@ CREATE TRIGGER tg_transaction_validate_requester
     ON transaction
     FOR EACH ROW EXECUTE FUNCTION validate_transaction_requester();
 
-CREATE TABLE transaction_risk_analysis(
-    id                              BIGSERIAL PRIMARY KEY,
-    transaction_id                  BIGINT NOT NULL REFERENCES transaction(id),
-    decision                        VARCHAR(20) NOT NULL,
-    score                           INTEGER,
-    reason_code                     VARCHAR(100) NOT NULL,
-    reason_description              VARCHAR(255) NOT NULL,
-    engine_version                  VARCHAR(100) NOT NULL,
-    analyzed_at                     TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
-    CONSTRAINT ck_transaction_risk_decision CHECK (decision IN ('APPROVED', 'REVIEW', 'BLOCKED')),
-    CONSTRAINT ck_transaction_risk_score CHECK (score IS NULL OR score BETWEEN 0 AND 1000)
-);
-
 -- Cada movimento e uma linha imutavel do extrato. O valor e sempre
 -- positivo; direction informa se ele entra ou sai da conta.
 CREATE TABLE account_movement(
@@ -405,7 +380,7 @@ CREATE TABLE account_movement(
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
     CONSTRAINT uq_account_movement_key UNIQUE(movement_key),
     CONSTRAINT ck_account_movement_direction CHECK (direction IN ('DEBIT', 'CREDIT')),
-    CONSTRAINT ck_account_movement_type CHECK (movement_type IN ('PRINCIPAL', 'FEE', 'REVERSAL')),
+    CONSTRAINT ck_account_movement_type CHECK (movement_type IN ('PRINCIPAL', 'FEE')),
     CONSTRAINT ck_account_movement_amount CHECK (amount_cents > 0),
     CONSTRAINT ck_account_movement_balance_after CHECK (balance_after_cents >= 0)
 );
@@ -423,8 +398,8 @@ BEGIN
 END;
 $$;
 
-CREATE TRIGGER tg_transaction_risk_analysis_append_only
-    BEFORE UPDATE OR DELETE ON transaction_risk_analysis
+CREATE TRIGGER tg_transaction_append_only
+    BEFORE UPDATE OR DELETE ON transaction
     FOR EACH ROW EXECUTE FUNCTION append_only();
 
 CREATE TRIGGER tg_account_movement_append_only
@@ -442,16 +417,10 @@ CREATE TRIGGER tg_transaction_no_delete
     BEFORE DELETE OR TRUNCATE ON transaction
     FOR EACH STATEMENT EXECUTE FUNCTION transaction_no_delete();
 
-CREATE TRIGGER tg_transaction_risk_analysis_no_truncate
-    BEFORE TRUNCATE ON transaction_risk_analysis
-    FOR EACH STATEMENT EXECUTE FUNCTION append_only();
-
 CREATE TRIGGER tg_account_movement_no_truncate
     BEFORE TRUNCATE ON account_movement
     FOR EACH STATEMENT EXECUTE FUNCTION append_only();
 
-CREATE TRIGGER tg_transaction_set_updated_at
-    BEFORE UPDATE ON transaction
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-CREATE INDEX ix_account_movement_statement ON account_movement (account_id, created_at DESC, id DESC);
+-- Extrato: movimentos de uma conta, do mais recente para o mais antigo,
+-- em paginas que continuam a partir do id da ultima linha vista.
+CREATE INDEX ix_account_movement_statement ON account_movement (account_id, id DESC);

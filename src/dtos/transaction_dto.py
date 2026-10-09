@@ -11,11 +11,7 @@ class TransactionDTO:
             "direction": transaction.direction,
             "amount_cents": transaction.amount_cents,
             "fee_cents": transaction.fee_cents,
-            "status": transaction.status,
-            "status_reason": transaction.status_reason,
             "created_at": transaction.created_at.isoformat(),
-            "updated_at": transaction.updated_at.isoformat(),
-            "completed_at": transaction.completed_at.isoformat() if transaction.completed_at else None,
         }
 
         if transaction.direction == Transaction.OUT:

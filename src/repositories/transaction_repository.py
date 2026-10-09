@@ -1,15 +1,15 @@
-from datetime import datetime, timezone
+from datetime import datetime
 from uuid import uuid4
 
 from sqlalchemy import func
 from sqlalchemy.dialects.postgresql import insert
 
 from database import Context
-from models import Account, AccountMovement, Transaction, TransactionRiskAnalysis
+from models import Account, AccountMovement, Transaction
 
 
 class TransactionRepository:
-    """Persistência de transações, análises de risco e movimentos de conta."""
+    """Persistencia de transacoes e movimentos de conta; as regras ficam no controller."""
 
     def __init__(self, context: Context) -> None:
         self.session = context.db_session
@@ -22,8 +22,13 @@ class TransactionRepository:
         tariff_rule_id: int,
         pix_key: str | None = None,
     ) -> Transaction | None:
+        """Grava o recebimento (TED ou Pix), ou devolve None se o aviso ja foi gravado.
+
+        O ON CONFLICT faz o indice unico decidir: dois avisos iguais ao
+        mesmo tempo nao passam os dois, porque o segundo espera o primeiro
+        terminar e entao encontra a linha (TRA-21).
+        """
         payer = notice["payer"]
-        now = datetime.now(timezone.utc)
         statement = (
             insert(Transaction)
             .values(
@@ -35,8 +40,6 @@ class TransactionRepository:
                 tariff_rule_id=tariff_rule_id,
                 destination_account_id=account.id,
                 external_reference=notice["external_id"],
-                status=Transaction.COMPLETED,
-                completed_at=now,
                 counterparty_name=payer["name"],
                 counterparty_document=payer["document"],
                 counterparty_bank_code=payer["bank_code"],
@@ -60,21 +63,14 @@ class TransactionRepository:
         return self.session.get(Transaction, transaction_id)
 
     def create_outgoing(self, transaction_data: dict) -> Transaction | None:
-        now = datetime.now(timezone.utc)
+        """Grava o envio, ou devolve None se a chave de idempotencia ja foi usada.
+
+        O ON CONFLICT faz a constraint decidir: dois pedidos com a mesma
+        chave ao mesmo tempo nao passam os dois.
+        """
         statement = (
             insert(Transaction)
-            .values(
-                **{
-                    "transaction_key": uuid4(),
-                    "direction": Transaction.OUT,
-                    "status": Transaction.COMPLETED,
-                    "validated_at": now,
-                    "authorized_at": now,
-                    "processing_at": now,
-                    "completed_at": now,
-                    **transaction_data,
-                }
-            )
+            .values(**{"transaction_key": uuid4(), "direction": Transaction.OUT, **transaction_data})
             .on_conflict_do_nothing(constraint="uq_transaction_idempotency")
             .returning(Transaction.id)
         )
@@ -82,26 +78,6 @@ class TransactionRepository:
         if transaction_id is None:
             return None
         return self.session.get(Transaction, transaction_id)
-
-    def create_risk_analysis(
-        self,
-        transaction: Transaction,
-        decision: str,
-        reason_code: str,
-        reason_description: str,
-        engine_version: str,
-        score: int | None = None,
-    ) -> TransactionRiskAnalysis:
-        analysis = TransactionRiskAnalysis(
-            transaction=transaction,
-            decision=decision,
-            score=score,
-            reason_code=reason_code,
-            reason_description=reason_description,
-            engine_version=engine_version,
-        )
-        self.session.add(analysis)
-        return analysis
 
     def get_by_idempotency_key(self, source_account_id: int, idempotency_key: str) -> Transaction | None:
         return (
@@ -114,14 +90,18 @@ class TransactionRepository:
         )
 
     def count_completed_sends(self, account_id: int, transaction_type: str, since: datetime) -> int:
+        """Envios de um tipo desde `since`. Recusas nao viram linha (TRA-09).
+
+        Quem chama ja travou a conta: dois envios simultaneos nao contam o
+        mesmo numero (TAR-07).
+        """
         return (
             self.session.query(func.count(Transaction.id))
             .filter(
                 Transaction.source_account_id == account_id,
                 Transaction.type == transaction_type,
                 Transaction.direction == Transaction.OUT,
-                Transaction.status == Transaction.COMPLETED,
-                Transaction.completed_at >= since,
+                Transaction.created_at >= since,
             )
             .scalar()
         )
