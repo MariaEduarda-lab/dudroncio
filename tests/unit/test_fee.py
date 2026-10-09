@@ -3,68 +3,76 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from errors import MissingFeeRule
-from models import FeeRule
-from utils.fee import calculate_fee_cents, month_start_brt
+from errors import MissingTariffRule
+from models import TariffRule
+from utils.tariff import calculate_tariff_cents, month_start_brt
 
 BRT = ZoneInfo("America/Sao_Paulo")
 
-PJ_PIX_RULE = FeeRule(person_type="PJ", transaction_type="PIX_OUT", free_monthly_quota=20, fee_cents=99)
-PJ_TED_RULE = FeeRule(person_type="PJ", transaction_type="TED_OUT", free_monthly_quota=2, fee_cents=499)
+PJ_PIX_RULE = TariffRule(
+    person_type="PJ", transaction_type="PIX", direction="OUT", monthly_free_quota=20, fee_after_quota_cents=99
+)
+PJ_TED_RULE = TariffRule(
+    person_type="PJ", transaction_type="TED", direction="OUT", monthly_free_quota=2, fee_after_quota_cents=499
+)
 
 
 # completed_sends_this_month conta os envios concluidos ANTES deste: o 20o
 # Pix do mes chega com 19 ja concluidos.
 
 
-@pytest.mark.parametrize("transaction_type", ["PIX_OUT", "TED_OUT", "PIX_IN", "TED_IN"])
-def test_pf_never_pays(transaction_type):
+@pytest.mark.parametrize("transaction_type,direction", [("PIX", "OUT"), ("TED", "OUT"), ("PIX", "IN"), ("TED", "IN")])
+def test_pf_never_pays(transaction_type, direction):
     # TAR-01: Ana (PF) faz o 30o Pix do mes e nao paga.
-    assert calculate_fee_cents("PF", transaction_type, 29, None) == 0
+    # Mesmo que a regra recebida tenha preco, PF nunca paga.
+    assert calculate_tariff_cents("PF", transaction_type, direction, 29, PJ_PIX_RULE) == 0
 
 
-@pytest.mark.parametrize("transaction_type", ["PIX_IN", "TED_IN"])
+@pytest.mark.parametrize("transaction_type", ["PIX", "TED"])
 def test_receiving_is_always_free(transaction_type):
     # TAR-02: a distribuidora recebe 100 Pix no mes, todos gratis.
-    assert calculate_fee_cents("PJ", transaction_type, 100, None) == 0
+    # Mesmo que a regra recebida tenha preco, receber e gratis.
+    assert calculate_tariff_cents("PJ", transaction_type, "IN", 100, PJ_PIX_RULE) == 0
 
 
 def test_twentieth_pix_is_free():
-    assert calculate_fee_cents("PJ", "PIX_OUT", 19, PJ_PIX_RULE) == 0
+    assert calculate_tariff_cents("PJ", "PIX", "OUT", 19, PJ_PIX_RULE) == 0
 
 
 def test_twenty_first_pix_pays_99_cents():
-    assert calculate_fee_cents("PJ", "PIX_OUT", 20, PJ_PIX_RULE) == 99
+    assert calculate_tariff_cents("PJ", "PIX", "OUT", 20, PJ_PIX_RULE) == 99
 
 
 def test_first_pix_of_the_month_is_free():
-    assert calculate_fee_cents("PJ", "PIX_OUT", 0, PJ_PIX_RULE) == 0
+    assert calculate_tariff_cents("PJ", "PIX", "OUT", 0, PJ_PIX_RULE) == 0
 
 
 def test_every_pix_after_the_quota_pays():
-    assert calculate_fee_cents("PJ", "PIX_OUT", 57, PJ_PIX_RULE) == 99
+    assert calculate_tariff_cents("PJ", "PIX", "OUT", 57, PJ_PIX_RULE) == 99
 
 
 def test_second_ted_is_free():
-    assert calculate_fee_cents("PJ", "TED_OUT", 1, PJ_TED_RULE) == 0
+    assert calculate_tariff_cents("PJ", "TED", "OUT", 1, PJ_TED_RULE) == 0
 
 
 def test_third_ted_pays_499_cents():
-    assert calculate_fee_cents("PJ", "TED_OUT", 2, PJ_TED_RULE) == 499
+    assert calculate_tariff_cents("PJ", "TED", "OUT", 2, PJ_TED_RULE) == 499
 
 
 def test_price_comes_from_the_rule():
     # TAR-14: um preco novo e so outra regra; o calculo nao fixa valores.
-    new_rule = FeeRule(person_type="PJ", transaction_type="PIX_OUT", free_monthly_quota=5, fee_cents=150)
-    assert calculate_fee_cents("PJ", "PIX_OUT", 4, new_rule) == 0
-    assert calculate_fee_cents("PJ", "PIX_OUT", 5, new_rule) == 150
+    new_rule = TariffRule(
+        person_type="PJ", transaction_type="PIX", direction="OUT", monthly_free_quota=5, fee_after_quota_cents=150
+    )
+    assert calculate_tariff_cents("PJ", "PIX", "OUT", 4, new_rule) == 0
+    assert calculate_tariff_cents("PJ", "PIX", "OUT", 5, new_rule) == 150
 
 
-@pytest.mark.parametrize("transaction_type", ["PIX_OUT", "TED_OUT"])
+@pytest.mark.parametrize("transaction_type", ["PIX", "TED"])
 def test_pj_send_without_rule_is_an_error(transaction_type):
     # Sem regra vigente o banco nao sabe o preco: nunca cobrar zero por engano.
-    with pytest.raises(MissingFeeRule):
-        calculate_fee_cents("PJ", transaction_type, 0, None)
+    with pytest.raises(MissingTariffRule):
+        calculate_tariff_cents("PJ", transaction_type, "OUT", 0, None)
 
 
 def test_month_start_is_first_day_midnight_in_brasilia():

@@ -11,14 +11,15 @@ class Transaction(Base):
     id = Column(BigInteger, primary_key=True)
     transaction_key = Column(UUID(as_uuid=True), nullable=False)
     type = Column(String(20), nullable=False)
+    direction = Column(String(3), nullable=False)
     amount_cents = Column(BigInteger, nullable=False)
     fee_cents = Column(BigInteger, nullable=False, server_default="0")
-    fee_rule_id = Column(BigInteger, ForeignKey("fee_rule.id"))
+    tariff_rule_id = Column(BigInteger, ForeignKey("tariff_rule.id"), nullable=False)
     source_account_id = Column(BigInteger, ForeignKey("account.id"))
     destination_account_id = Column(BigInteger, ForeignKey("account.id"))
     idempotency_key = Column(String(64))
-    request_hash = Column(CHAR(64))
-    external_id = Column(String(64))
+    external_reference = Column(String(64))
+    request_fingerprint = Column(CHAR(64))
     counterparty_name = Column(String(255), nullable=False)
     counterparty_document = Column(String(14), nullable=False)
     counterparty_bank_code = Column(CHAR(3), nullable=False)
@@ -31,8 +32,10 @@ class Transaction(Base):
 
     source_account = relationship("Account", foreign_keys=[source_account_id])
     destination_account = relationship("Account", foreign_keys=[destination_account_id])
+    tariff_rule = relationship("TariffRule", back_populates="transactions")
+    account_movements = relationship("AccountMovement", back_populates="transaction", order_by="AccountMovement.id")
 
-    TED_IN = "TED_IN"
-    PIX_IN = "PIX_IN"
-    PIX_OUT = "PIX_OUT"
-    TED_OUT = "TED_OUT"
+    PIX = "PIX"
+    TED = "TED"
+    IN = "IN"
+    OUT = "OUT"

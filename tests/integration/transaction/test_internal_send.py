@@ -70,6 +70,7 @@ class TestInternalPix:
         assert set(transaction) == {
             "transaction_key",
             "type",
+            "direction",
             "amount_cents",
             "fee_cents",
             "account_key",
@@ -77,7 +78,8 @@ class TestInternalPix:
             "recipient",
             "created_at",
         }
-        assert transaction["type"] == "PIX_OUT"
+        assert transaction["type"] == "PIX"
+        assert transaction["direction"] == "OUT"
         assert transaction["amount_cents"] == 10000
         assert transaction["fee_cents"] == 0
         assert transaction["account_key"] == sender["account_key"]
@@ -139,13 +141,15 @@ class TestInternalTed:
         assert set(transaction) == {
             "transaction_key",
             "type",
+            "direction",
             "amount_cents",
             "fee_cents",
             "account_key",
             "recipient",
             "created_at",
         }
-        assert transaction["type"] == "TED_OUT"
+        assert transaction["type"] == "TED"
+        assert transaction["direction"] == "OUT"
         assert transaction["recipient"]["bank_code"] == "999"
         assert transaction["recipient"]["branch"] == recipient["branch"]
         assert balance_of(sender) == 20000

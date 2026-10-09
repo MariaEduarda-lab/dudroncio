@@ -27,6 +27,7 @@ class Account(Base):
     )
 
     client = relationship("Client", back_populates="account")
+    account_movements = relationship("AccountMovement", back_populates="account", order_by="AccountMovement.id")
 
     CREATED = "CREATED"
     ACTIVE = "ACTIVE"

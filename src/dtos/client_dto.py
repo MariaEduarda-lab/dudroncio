@@ -50,4 +50,5 @@ class ClientDTO:
             "email": representative.email,
             "phone_number": representative.phone_number,
             "role": representative.role,
+            "created_at": representative.created_at.isoformat(),
         }

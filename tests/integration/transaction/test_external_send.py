@@ -1,5 +1,8 @@
 import random
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
+
+import pytest
 
 from tests.utils import CentralBankMock, PayloadGenerator, RequestGenerator
 
@@ -73,7 +76,8 @@ class TestExternalPix:
 
         status, transaction = send(sender, PayloadGenerator.create_pix_send_payload(pix_key, 10000))
         assert status == 201
-        assert transaction["type"] == "PIX_OUT"
+        assert transaction["type"] == "PIX"
+        assert transaction["direction"] == "OUT"
         assert transaction["amount_cents"] == 10000
         assert transaction["fee_cents"] == 0
         assert transaction["pix_key"] == pix_key
@@ -195,6 +199,27 @@ class TestExternalPix:
         assert balance_of(sender) == 40000
         assert CentralBankMock.pix_calls(pix_key) == 1
 
+    @pytest.mark.parametrize("balance", [50000, 10000], ids=["balance_to_spare", "exact_balance"])
+    def test_double_click_reaches_the_central_bank_once(self, balance):
+        # Os dois cliques chegam juntos; o Banco Central demora para o segundo
+        # ficar esperando a trava. Ele tem de receber a mesma transacao, sem
+        # um segundo pedido ao Banco Central (seria um segundo pagamento) e
+        # sem "saldo insuficiente" quando o saldo so cobre um envio.
+        sender = create_pf_account()
+        fund(sender, balance)
+        pix_key = external_pix_key()
+        CentralBankMock.answer_pix(pix_key, 200, CentralBankMock.confirmation(), delay_seconds=1)
+        key = new_key()
+        payload = PayloadGenerator.create_pix_send_payload(pix_key, 10000)
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(lambda _: send(sender, payload, key), range(2)))
+
+        assert sorted(status for status, _ in results) == [200, 201]
+        assert len({response["transaction_key"] for _, response in results}) == 1
+        assert balance_of(sender) == balance - 10000
+        assert CentralBankMock.pix_calls(pix_key) == 1
+
 
 class TestExternalTed:
     def test_sends_when_the_central_bank_confirms(self):
@@ -205,7 +230,8 @@ class TestExternalTed:
 
         status, transaction = send(sender, external_ted(account, 30000))
         assert status == 201
-        assert transaction["type"] == "TED_OUT"
+        assert transaction["type"] == "TED"
+        assert transaction["direction"] == "OUT"
         assert transaction["recipient"]["bank_code"] == "237"
         assert "pix_key" not in transaction
         assert balance_of(sender) == 20000

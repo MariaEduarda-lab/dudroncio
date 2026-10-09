@@ -3,38 +3,42 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from models import FeeRule
-from utils.fee import calculate_fee_cents, month_start_brt
+from models import TariffRule
+from utils.tariff import calculate_tariff_cents, month_start_brt
 
 BRT = ZoneInfo("America/Sao_Paulo")
 
-PJ_PIX_RULE = FeeRule(person_type="PJ", transaction_type="PIX_OUT", free_monthly_quota=20, fee_cents=99)
+PJ_PIX_RULE = TariffRule(
+    person_type="PJ", transaction_type="PIX", direction="OUT", monthly_free_quota=20, fee_after_quota_cents=99
+)
 
 
 # Casos de fronteira que o test_fee.py não cobre (testes da Lupa).
 
 
-@pytest.mark.parametrize("transaction_type", ["PIX_IN", "TED_IN"])
+@pytest.mark.parametrize("transaction_type", ["PIX", "TED"])
 def test_receiving_is_free_even_with_a_priced_rule_at_hand(transaction_type):
     # TAR-02: mesmo que quem chama passe uma regra com preço, receber é grátis.
-    assert calculate_fee_cents("PJ", transaction_type, 500, PJ_PIX_RULE) == 0
+    assert calculate_tariff_cents("PJ", transaction_type, "IN", 500, PJ_PIX_RULE) == 0
 
 
 def test_pf_never_pays_even_with_a_priced_rule_at_hand():
     # TAR-01: a regra da PJ nunca vale para PF.
-    assert calculate_fee_cents("PF", "PIX_OUT", 500, PJ_PIX_RULE) == 0
+    assert calculate_tariff_cents("PF", "PIX", "OUT", 500, PJ_PIX_RULE) == 0
 
 
 def test_rule_without_free_quota_charges_the_first_send():
-    rule = FeeRule(person_type="PJ", transaction_type="TED_OUT", free_monthly_quota=0, fee_cents=499)
-    assert calculate_fee_cents("PJ", "TED_OUT", 0, rule) == 499
+    rule = TariffRule(
+        person_type="PJ", transaction_type="TED", direction="OUT", monthly_free_quota=0, fee_after_quota_cents=499
+    )
+    assert calculate_tariff_cents("PJ", "TED", "OUT", 0, rule) == 499
 
 
 @pytest.mark.parametrize("completed", range(0, 25))
 def test_exactly_twenty_free_pix_then_every_one_pays(completed):
     # TAR-03: a fronteira inteira, envio a envio: do 1o ao 20o grátis, do 21o em diante 99.
     expected = 0 if completed < 20 else 99
-    assert calculate_fee_cents("PJ", "PIX_OUT", completed, PJ_PIX_RULE) == expected
+    assert calculate_tariff_cents("PJ", "PIX", "OUT", completed, PJ_PIX_RULE) == expected
 
 
 def test_month_start_ignores_the_offset_of_the_input():

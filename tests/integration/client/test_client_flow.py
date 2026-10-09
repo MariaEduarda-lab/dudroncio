@@ -54,6 +54,7 @@ class TestPjClient:
         assert "password_hash" not in client
         assert "full_name" not in client
         assert "birthdate" not in client
+        assert "updated_at" not in client
 
         representative = client["legal_representatives"][0]
         assert representative["cpf"].startswith("***.***.***-")
@@ -62,6 +63,7 @@ class TestPjClient:
         assert "password_hash" not in representative
         assert "status" not in representative
         assert "id" not in representative
+        assert "updated_at" not in representative
 
     def test_refuses_invalid_cnpj_without_exposing_it(self):
         payload = PayloadGenerator.create_client_payload(cnpj="11.111.111/1111-11")
