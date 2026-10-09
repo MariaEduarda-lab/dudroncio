@@ -10,7 +10,7 @@
 
 ### Entendendo o problema
 
-O sistema cadastra pessoas físicas e jurídicas, abre uma conta para cada cliente e movimenta dinheiro só por PIX e TED: recebimentos vindos de outros bancos, envios entre clientes do próprio banco e envios para outros bancos. A PF é identificada pelo CPF; a PJ, pelo CNPJ, e é cadastrada com um representante legal. A garantia central é sobre o dinheiro: nenhum envio pode ser executado duas vezes, nenhum saldo pode ficar negativo e nenhum centavo pode ser criado ou perdido, mesmo com pedidos simultâneos, cliques repetidos ou um banco externo que não responde. Toda tarifa precisa ser a correta para o tipo de cliente e para a quantidade de envios do mês, e o extrato precisa reconstruir o saldo linha a linha. Se algo der errado, o pedido é recusado por inteiro: nada é gravado e o saldo não muda. Ficam fora desta entrega: login e autorização por usuário, MFA, antifraude, estorno, envio pendente com reconciliação, depósito e saque, cartões, boletos, crédito, múltiplas contas por cliente e integração real com SPI/STR.
+O sistema cadastra pessoas físicas (CPF) e jurídicas (CNPJ, com representante legal), abre uma conta para cada cliente e movimenta dinheiro só por PIX e TED: recebimentos de outros bancos, envios entre clientes do banco e envios para outros bancos. A garantia central é sobre o dinheiro: nenhum envio é executado duas vezes, nenhum saldo fica negativo e nenhum centavo é criado ou perdido, mesmo com pedidos simultâneos, cliques repetidos ou um banco externo que não responde. A tarifa precisa ser a correta para o tipo de cliente e para os envios do mês, e o extrato precisa reconstruir o saldo linha a linha. Se algo der errado, o pedido é recusado por inteiro e nada muda. Fora do escopo: login, MFA, antifraude, estorno, envio pendente com reconciliação, depósito e saque, cartões, boletos, crédito e integração real com SPI/STR.
 
 ### Explicando a solução de forma macro
 
@@ -25,7 +25,7 @@ Um único `Client`, discriminado por `person_type`, representa PF ou PJ; `LegalR
 
 ### Rotas
 
-Todas as rotas exigem o cabeçalho `INTERNAL-TOKEN`. Todo erro devolve `title`, `description`, `translation` e um código `QIT…` específico; nenhuma resposta expõe id interno.
+Todas as rotas exigem o cabeçalho `INTERNAL-TOKEN`; sem ele, `403`. Todo erro devolve `title`, `description`, `translation` e um código `QIT…` específico; nenhuma resposta expõe id interno. Risco aceito nesta entrega: sem login, quem tem o token acessa qualquer conta, e a regra de responder `404` para recurso de outra pessoa (R8) ainda não se aplica.
 
 | Método | Caminho | O que faz | Entrada (campos que importam) | Saídas (status e quando) |
 |---|---|---|---|---|
@@ -36,7 +36,7 @@ Todas as rotas exigem o cabeçalho `INTERNAL-TOKEN`. Todo erro devolve `title`, 
 | `PATCH` | `/accounts/{account_key}` | Bloqueia, reativa ou encerra | `status`, `reason` | `200`; `400` corpo inválido; `404` inexistente; `409` transição proibida ou encerramento com saldo. Idempotente: pedir o estado atual não muda nada. |
 | `POST` | `/accounts/{account_key}/transactions` | Envia PIX ou TED | cabeçalho `Idempotency-Key`; `type`, `amount_cents`; `pix_key` (PIX) ou banco, agência e conta (TED) | `201` concluída; `200` repetição do mesmo pedido; `400` corpo ou chave inválidos; `404` conta, destino ou chave PIX inexistente; `422` saldo insuficiente, conta inativa, envio para a própria conta, Banco Central recusou ou chave reutilizada com outro pedido; `503` Banco Central sem resposta a tempo. Idempotente por `(source_account_id, idempotency_key)` e impressão digital do pedido. |
 | `POST` | `/webhook/central_bank/teds` e `/pix` | Credita um recebimento | `external_id`, `amount_cents`, pagador; TED: agência e conta; PIX: chave | `201` creditado; `200` aviso repetido; `400` corpo inválido; `404` conta ou chave inexistente; `422` referência reutilizada com outro conteúdo ou conta inativa. Idempotente por `(type, banco de origem, external_reference)`. |
-| `GET` | `/accounts/{account_key}/statement` | Extrato paginado | `limit` (1 a 100, padrão 50), `after` (cursor `movement_key`) | `200` com movimentos e `next_cursor`; `400` parâmetro inválido; `404` conta inexistente; `422` cursor de outra conta ou inexistente. Leitura. |
+| `GET` | `/accounts/{account_key}/statement` | Extrato paginado | `limit` (1 a 100, padrão 50), `after` (cursor `movement_key`) | `200` com movimentos e `next_cursor`; `400` parâmetro inválido, inclusive cursor vazio ou com mais de 64 caracteres; `404` conta inexistente; `422` cursor de outra conta ou que não existe. Leitura. |
 
 ### Banco de Dados (Somente diagrama)
 
@@ -64,6 +64,7 @@ erDiagram
         varchar primary_activity "somente PJ"
         bigint monthly_income_cents
         varchar email UK "minusculo"
+        varchar phone_number
         jsonb address
         timestamptz created_at
     }
@@ -73,13 +74,18 @@ erDiagram
         uuid representative_key UK "publico"
         bigint client_id FK "cliente PJ"
         char cpf UK
+        varchar full_name
+        date birthdate "maior de idade"
         varchar email UK "minusculo"
+        varchar phone_number
+        varchar role "funcao na empresa"
         varchar password_hash
         timestamptz created_at
     }
 
     REGISTERED_EMAIL {
         varchar email PK "unico entre clientes e representantes"
+        timestamptz created_at
     }
 
     ACCOUNT {
@@ -104,6 +110,7 @@ erDiagram
         integer monthly_free_quota "nulo e ilimitado"
         bigint fee_after_quota_cents "maior que zero so para envio PJ"
         timestamptz valid_from UK "com tipo de pessoa, operacao e direcao"
+        timestamptz created_at
     }
 
     TRANSACTION {
@@ -122,6 +129,8 @@ erDiagram
         varchar counterparty_name "outra parte"
         varchar counterparty_document
         char counterparty_bank_code
+        varchar counterparty_branch
+        varchar counterparty_account_number
         varchar pix_key "somente PIX"
         timestamptz created_at "nunca editada nem apagada"
     }
@@ -157,7 +166,7 @@ erDiagram
 2. Localiza o destino: chave PIX de cliente nosso ou TED com o código do banco (`999`) é envio interno; o resto vai para outro banco.
 3. Trava as contas envolvidas com `SELECT … FOR UPDATE`, sempre na ordem do `id` (menor primeiro), e confere que estão `ACTIVE`.
 4. Com a conta travada, conta os envios do mesmo tipo no mês de Brasília e aplica a `TariffRule` vigente: PJ tem 20 PIX e 2 TED grátis por mês e depois paga 99 e 499 centavos; PF e recebimentos não pagam.
-5. Envio interno: grava a transação com `ON CONFLICT (source_account_id, idempotency_key) DO NOTHING`, que reserva a chave; debita valor e tarifa num único `UPDATE … SET balance_cents = balance_cents - total WHERE balance_cents >= total RETURNING balance_cents`; credita o destino e cria os movimentos (principal e tarifa na origem, principal no destino), cada um com o saldo do `RETURNING`.
+5. Envio interno: grava a transação com `ON CONFLICT (source_account_id, idempotency_key) DO NOTHING`, que reserva a chave; debita valor e tarifa num único `UPDATE … SET balance_cents = balance_cents - total WHERE balance_cents >= total RETURNING balance_cents`; credita o destino e cria os movimentos (principal e tarifa na origem, principal no destino) com o saldo que o `UPDATE` devolveu: na origem, o principal registra o saldo antes da tarifa e a tarifa, o saldo final.
 6. Envio externo: debita da mesma forma, pergunta ao Banco Central e espera até 5 segundos; com a confirmação, grava a transação com os dados do recebedor e os movimentos da origem.
 7. Tudo é confirmado num único commit. O recebedor recebe o valor cheio; a tarifa é uma linha separada no extrato de quem enviou.
 
@@ -165,14 +174,14 @@ erDiagram
 
 1. Se o `UPDATE` não afeta nenhuma linha, o saldo não cobre valor e tarifa: rollback, `422`, e a chave de idempotência e a cota continuam livres. Sem saldo, o Banco Central nem é chamado.
 2. Pedidos simultâneos na mesma conta esperam a trava; o segundo relê saldo e cota. Dois envios cruzados (A→B e B→A) pedem as travas na mesma ordem e não travam um ao outro.
-3. Dois cliques com a mesma chave: o segundo espera a trava, cai no `ON CONFLICT` e recebe a mesma transação. A mesma chave com outro pedido recebe `422`.
+3. Dois cliques com a mesma chave: o segundo espera a trava e confere a chave de novo antes de debitar (e o `ON CONFLICT` garante no banco), então recebe a mesma transação, sem novo débito nem nova chamada ao Banco Central. A mesma chave com outro pedido recebe `422`.
 4. Banco Central recusa (`422`) ou não responde a tempo (`503`): rollback do débito, nada é gravado e o cliente pode tentar de novo. Risco aceito: se ele confirmar e a resposta se perder, o envio é recusado aqui, e a correção exigiria reconciliação, que está fora do escopo.
 
 > ## Principal desafio
 >
 > - **Qual é:** nenhum débito duplicado, saldo negativo ou vaga grátis usada duas vezes, com pedidos simultâneos, retentativas e um banco externo que pode não responder.
 > - **Por que é difícil:** ler o saldo, calcular e gravar perde atualizações sob concorrência; travas em ordens diferentes geram deadlock; e o pedido repetido pode chegar enquanto o primeiro ainda está em andamento.
-> - **Como o desenho resolve:** débito atômico condicional no próprio `UPDATE`; travas sempre na ordem do `id`; chave de idempotência única por conta, resolvida pelo `ON CONFLICT`; cota contada com a conta travada; e transação, movimentos e saldos num único commit. Testes black box provam: 20 transferências cruzadas simultâneas, duplo clique, dois envios disputando a última vaga grátis e conservação do dinheiro (soma dos saldos = recebido − enviado para fora − tarifas).
+> - **Como o desenho resolve:** débito atômico condicional no próprio `UPDATE`; travas sempre na ordem do `id`; chave de idempotência única por conta, conferida de novo depois da trava e garantida pelo `ON CONFLICT`; cota contada com a conta travada; e transação, movimentos e saldos num único commit. Testes black box provam: 20 transferências cruzadas simultâneas, duplo clique (interno e para outro banco), dois envios disputando a última vaga grátis e conservação do dinheiro (soma dos saldos = recebido − enviado para fora − tarifas).
 
 **Recebimento PIX/TED — caminho feliz**
 
@@ -191,5 +200,5 @@ erDiagram
 
 **Extrato — falha: cursor inválido**
 
-1. Cursor de outra conta, inexistente ou malformado recebe `422`; conta inexistente, `404`.
+1. Cursor de outra conta ou que não existe recebe `422`; cursor vazio ou longo demais, `400`; conta inexistente, `404`.
 2. Um movimento novo entra no topo e não desloca as páginas seguintes, porque a próxima página começa abaixo do `id` da última linha vista.
