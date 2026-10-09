@@ -17,8 +17,6 @@ class Transaction(Base):
     tariff_rule_id = Column(BigInteger, ForeignKey("tariff_rule.id"), nullable=False)
     source_account_id = Column(BigInteger, ForeignKey("account.id"))
     destination_account_id = Column(BigInteger, ForeignKey("account.id"))
-    requested_by_client_id = Column(BigInteger, ForeignKey("client.id"))
-    requested_by_representative_id = Column(BigInteger, ForeignKey("legal_representative.id"))
     idempotency_key = Column(String(64))
     external_reference = Column(String(64))
     request_fingerprint = Column(CHAR(64))
@@ -34,8 +32,6 @@ class Transaction(Base):
 
     source_account = relationship("Account", foreign_keys=[source_account_id])
     destination_account = relationship("Account", foreign_keys=[destination_account_id])
-    requested_by_client = relationship("Client", foreign_keys=[requested_by_client_id])
-    requested_by_representative = relationship("LegalRepresentative", foreign_keys=[requested_by_representative_id])
     tariff_rule = relationship("TariffRule", back_populates="transactions")
     account_movements = relationship("AccountMovement", back_populates="transaction", order_by="AccountMovement.id")
 

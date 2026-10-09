@@ -60,8 +60,6 @@ class TransactionController(BaseController):
             "type": send_data["type"],
             "amount_cents": request["amount_cents"],
             "source_account_id": source.id,
-            "requested_by_client_id": source.client_id,
-            "requested_by_representative_id": self._representative_id(source),
             "idempotency_key": idempotency_key,
             "request_fingerprint": request_fingerprint,
             "pix_key": request.get("pix_key"),
@@ -372,11 +370,3 @@ class TransactionController(BaseController):
             and transaction.counterparty_branch == payer["branch"]
             and transaction.counterparty_account_number == payer["account_number"]
         )
-
-    @staticmethod
-    def _representative_id(account: Account) -> int | None:
-        if account.client.person_type == Client.PF:
-            return None
-        # O contrato atual autentica o serviço e cadastra um representante.
-        # Com identidade de usuário, este id deverá vir do token autenticado.
-        return account.client.legal_representatives[0].id

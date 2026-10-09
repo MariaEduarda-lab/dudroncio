@@ -20,7 +20,6 @@ class ClientDTO:
             "phone_number": client.phone_number,
             "address": dict(client.address),
             "created_at": client.created_at.isoformat(),
-            "updated_at": client.updated_at.isoformat(),
         }
 
         if client.person_type == Client.PF:
@@ -52,5 +51,4 @@ class ClientDTO:
             "phone_number": representative.phone_number,
             "role": representative.role,
             "created_at": representative.created_at.isoformat(),
-            "updated_at": representative.updated_at.isoformat(),
         }

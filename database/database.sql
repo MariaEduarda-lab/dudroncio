@@ -15,7 +15,6 @@ CREATE TABLE client(
     phone_number                    VARCHAR(16) NOT NULL,
     address                         JSONB NOT NULL,
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
-    updated_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
     CONSTRAINT uq_client_key UNIQUE(client_key),
     CONSTRAINT uq_client_document UNIQUE(document_number),
     CONSTRAINT uq_client_email UNIQUE(email),
@@ -56,7 +55,6 @@ CREATE TABLE legal_representative(
     role                            VARCHAR(100) NOT NULL,
     password_hash                   VARCHAR(255) NOT NULL,
     created_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
-    updated_at                      TIMESTAMPTZ NOT NULL DEFAULT(NOW()),
     CONSTRAINT uq_legal_representative_key UNIQUE(representative_key),
     CONSTRAINT uq_legal_representative_cpf UNIQUE(cpf),
     CONSTRAINT uq_legal_representative_email UNIQUE(email),
@@ -118,14 +116,6 @@ BEGIN
     RETURN NEW;
 END;
 $$;
-
-CREATE TRIGGER tg_client_set_updated_at
-    BEFORE UPDATE ON client
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
-
-CREATE TRIGGER tg_legal_representative_set_updated_at
-    BEFORE UPDATE ON legal_representative
-    FOR EACH ROW EXECUTE FUNCTION set_updated_at();
 
 CREATE TRIGGER tg_account_set_updated_at
     BEFORE UPDATE ON account
@@ -267,8 +257,6 @@ CREATE TABLE transaction(
     tariff_rule_id                  BIGINT NOT NULL REFERENCES tariff_rule(id),
     source_account_id               BIGINT REFERENCES account(id),
     destination_account_id          BIGINT REFERENCES account(id),
-    requested_by_client_id          BIGINT REFERENCES client(id),
-    requested_by_representative_id  BIGINT REFERENCES legal_representative(id),
     idempotency_key                 VARCHAR(64),
     external_reference              VARCHAR(64),
     request_fingerprint             CHAR(64),
@@ -297,7 +285,6 @@ CREATE TABLE transaction(
         OR (
             source_account_id IS NOT NULL AND idempotency_key IS NOT NULL
             AND request_fingerprint IS NOT NULL AND external_reference IS NULL
-            AND requested_by_client_id IS NOT NULL
         )
     ),
     CONSTRAINT ck_transaction_not_to_itself CHECK (source_account_id IS DISTINCT FROM destination_account_id),
@@ -319,52 +306,6 @@ CREATE UNIQUE INDEX ux_transaction_incoming_ref
 CREATE INDEX ix_transaction_sends
     ON transaction (source_account_id, type, created_at)
     WHERE direction = 'OUT';
-
--- O solicitante precisa ser o titular da conta. Para PJ, o representante
--- informado também precisa pertencer àquele cliente; para PF ele não existe.
-CREATE FUNCTION validate_transaction_requester() RETURNS trigger
-LANGUAGE plpgsql AS $$
-DECLARE
-    account_client_id BIGINT;
-    requester_person_type VARCHAR(2);
-BEGIN
-    IF NEW.direction = 'IN' THEN
-        IF NEW.requested_by_client_id IS NOT NULL OR NEW.requested_by_representative_id IS NOT NULL THEN
-            RAISE EXCEPTION 'Recebimento externo nao possui solicitante local' USING ERRCODE = 'check_violation';
-        END IF;
-        RETURN NEW;
-    END IF;
-
-    SELECT a.client_id, c.person_type
-      INTO account_client_id, requester_person_type
-      FROM account a
-      JOIN client c ON c.id = a.client_id
-     WHERE a.id = NEW.source_account_id;
-
-    IF NEW.requested_by_client_id IS DISTINCT FROM account_client_id THEN
-        RAISE EXCEPTION 'O solicitante deve ser o titular da conta de origem' USING ERRCODE = 'check_violation';
-    END IF;
-
-    IF requester_person_type = 'PF' AND NEW.requested_by_representative_id IS NOT NULL THEN
-        RAISE EXCEPTION 'Cliente PF nao opera por representante legal' USING ERRCODE = 'check_violation';
-    END IF;
-
-    IF requester_person_type = 'PJ' AND NOT EXISTS (
-        SELECT 1 FROM legal_representative
-         WHERE id = NEW.requested_by_representative_id
-           AND client_id = account_client_id
-    ) THEN
-        RAISE EXCEPTION 'Saida PJ exige representante do cliente' USING ERRCODE = 'check_violation';
-    END IF;
-
-    RETURN NEW;
-END;
-$$;
-
-CREATE TRIGGER tg_transaction_validate_requester
-    BEFORE INSERT OR UPDATE OF source_account_id, requested_by_client_id, requested_by_representative_id, direction
-    ON transaction
-    FOR EACH ROW EXECUTE FUNCTION validate_transaction_requester();
 
 -- Cada movimento e uma linha imutavel do extrato. O valor e sempre
 -- positivo; direction informa se ele entra ou sai da conta.

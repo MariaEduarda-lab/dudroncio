@@ -27,7 +27,6 @@ class Client(Base):
     phone_number = Column(String(16), nullable=False)
     address = Column(JSONB, nullable=False)
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
     __table_args__ = (
         UniqueConstraint("client_key", name="uq_client_key"),
