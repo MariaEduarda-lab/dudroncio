@@ -19,7 +19,7 @@ class CnpjRegistryConnector:
     No MVP nao existe Receita Federal para consultar, entao a resposta e
     local: CNPJs da tabela acima voltam inelegiveis e os demais voltam
     ACTIVE. Quando houver um mock ou servico real, este arquivo passa a
-    herdar de RestConnector (como o bankslip_connector.py) e o controller
+    herdar de RestConnector (como o central_bank_connector.py) e o controller
     nao muda.
     """
 
