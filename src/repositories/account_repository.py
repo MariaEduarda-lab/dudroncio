@@ -52,6 +52,9 @@ class AccountRepository:
             .first()
         )
 
+    def get_by_client_id(self, client_id: int) -> Account | None:
+        return self.session.query(Account).filter(Account.client_id == client_id).first()
+
     def lock_by_ids(self, account_ids: list[int]) -> list[Account]:
         """Trava as contas sempre na ordem do id, menor primeiro.
 
