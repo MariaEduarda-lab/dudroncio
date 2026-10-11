@@ -1,0 +1,20 @@
+# Banco efemero exclusivo dos testes destrutivos de privilegios.
+# Uso: docker compose -p dudroncio-security -f docker-compose.security.yml up -d --build
+services:
+  db-security:
+    build: ./database/.
+    environment:
+      POSTGRES_USER: database_owner
+      POSTGRES_PASSWORD: ${SECURITY_DATABASE_OWNER_PASSWORD:-security-owner-local-only}
+      POSTGRES_DB: security_test
+      APPLICATION_DB_PASSWORD: ${SECURITY_APPLICATION_DB_PASSWORD:-security-runtime-local-only}
+    ports:
+      - "127.0.0.1:${SECURITY_DB_PORT:-55432}:5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U database_owner -d security_test"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
+

@@ -17,7 +17,7 @@ Quem chama a API informa o que quer fazer — tipo (PIX ou TED), valor e destino
 | `middlewares/` | Exige o `INTERNAL-TOKEN` em toda rota de negócio (`403` sem ele); cria o `x-request-id` e **saneia** o que vier de fora, contra injeção de linhas no log; abre e fecha a sessão do banco com rollback em erro | `internal_token.py`, `request_context.py`, `session_manager.py` |
 | `schemas/` | Formato, tipos, tamanhos, enums, centavos inteiros de 1 a 100 bilhões; recusa campos desconhecidos | `src/schemas/*.json` |
 | `controllers/` | Regras de negócio: documento válido, maioridade, idempotência, travas, tarifa, conta ativa, ordem do fluxo e commit | `client_controller.py`, `transaction_controller.py` |
-| `repositories/` | Movimentos de saldo atômicos (`UPDATE … RETURNING`), `ON CONFLICT` nas chaves únicas, travas em ordem; chave pública em formato inválido vira "não encontrado", não erro de banco | `account_repository.py`, `transaction_repository.py` |
+| `repositories/` | Chamadas parametrizadas às funções atômicas de saldo, `ON CONFLICT` nas chaves únicas, travas em ordem; chave pública inválida vira "não encontrado" | `account_repository.py`, `transaction_repository.py` |
 | `database.sql` | A última barreira: `CHECK`, `UNIQUE`, chaves estrangeiras e triggers (seção 5) | `database/database.sql` |
 | `connectors/` | O Banco Central fake é chamado com tempo limite; sem resposta vira "indisponível"; a confirmação só vale se passar por um schema (`central_bank_confirmation.json`) | `central_bank_connector.py` |
 | `dtos/` | Lista explícita de campos: nunca sai `id` interno nem `password_hash`; CPF sai mascarado (`***.***.***-25`) no cliente, no representante e no recebedor de um envio | `client_dto.py`, `transaction_dto.py` |
@@ -27,7 +27,7 @@ Quem chama a API informa o que quer fazer — tipo (PIX ou TED), valor e destino
 
 | Garantia | Como | Provado por |
 |---|---|---|
-| Saldo nunca negativo | Débito num único `UPDATE … WHERE balance_cents >= total RETURNING`; nenhuma linha afetada = saldo insuficiente. `CHECK (balance_cents >= 0)` como última barreira | `test_many_sends_spend_exactly_what_the_balance_allows` |
+| Saldo nunca negativo | `debit_account` executa um único `UPDATE … WHERE balance_cents >= total RETURNING`; nenhuma linha afetada = saldo insuficiente. `CHECK (balance_cents >= 0)` como última barreira | `test_many_sends_spend_exactly_what_the_balance_allows` |
 | Nenhuma atualização perdida | Nunca "ler o saldo, calcular e gravar": crédito e débito são `balance_cents ± x` no próprio `UPDATE` | `test_crossed_transfers_never_lose_money_nor_fail` |
 | Sem deadlock em envios cruzados | Contas travadas com `SELECT … FOR UPDATE` sempre na ordem do `id` | idem (20 envios A→B e B→A simultâneos); falha por deadlock quando a ordem é quebrada de propósito |
 | Duplo clique paga uma vez | Chave de idempotência única por conta de origem: conferida antes, **conferida de novo depois da trava** e garantida pelo `ON CONFLICT (source_account_id, idempotency_key)`. Mesmo pedido devolve a mesma transação (`200`); outro pedido com a mesma chave, `422` | `test_double_click_creates_a_single_transaction`, `test_double_click_reaches_the_central_bank_once` |
@@ -62,33 +62,50 @@ Quem chama a API informa o que quer fazer — tipo (PIX ou TED), valor e destino
 
 Toda constraint tem nome, e as violações esperadas viram erro de negócio com código próprio (por exemplo, e-mail repetido → `409 QIT002004`).
 
+### 5.1 Papéis e privilégio mínimo
+
+- `database_owner` possui os objetos e executa somente o bootstrap/manutenção versionada.
+  Sua credencial não é entregue ao container da API.
+- `application_user` é o único papel usado pela API. Não é superusuário, não cria
+  banco/role/schema e não pertence ao owner.
+- `PUBLIC` não tem `CREATE`/`TEMPORARY` no banco nem `CREATE` no schema. Grants de tabela,
+  sequência e função são explícitos; defaults futuros permanecem fechados.
+- O runtime não executa `DELETE`, `TRUNCATE`, DDL nem atualiza saldo/identidade da conta.
+  Ele pode alterar apenas `status` e `status_reason`.
+- `credit_account` e `debit_account` são `SECURITY DEFINER`, pertencem ao owner, fixam
+  `search_path=pg_catalog`, qualificam `public.account`, recusam valor não positivo e são
+  as únicas rotinas financeiras concedidas ao runtime.
+
+As consultas da aplicação usam ORM ou bind parameters. Os testes reais em
+`tests/security/` exercitam as recusas com o runtime e o caminho permitido com ambas as
+credenciais em um PostgreSQL efêmero.
+
 ## 6. Riscos aceitos nesta entrega
 
 Escolhas conscientes do escopo "make it simple", registradas para não parecerem esquecimento.
 
 | Risco | Por que existe | O que reduz hoje |
 |---|---|---|
-| **Sem login (R8 / IDOR):** quem tem o `INTERNAL-TOKEN` consulta e movimenta qualquer conta | Login e autorização por usuário ficaram fora da fase 1 | Chaves públicas em UUID (não enumeráveis); o token protege a API como um todo |
-| **Token único e compartilhado** | Padrão do repositório-base para chamadas internas | Valor vem do ambiente; padrão só para uso local |
+| **Rotas legadas com token interno compartilhado** | Mantidas por compatibilidade; as fachadas de cliente já resolvem a conta pelo Bearer | Valor vem do ambiente; padrão só para uso local |
 | **Webhook do Banco Central autenticado só pelo token** (sem assinatura nem janela de tempo) | O Banco Central é simulado | Referência única impede crédito repetido; schema estrito |
 | **Sem limite de requisições** | Fora do escopo | Paginação com teto de 100; timeout no connector |
 | **Confirmação perdida:** o Banco Central confirma e a resposta não chega | Envio síncrono sem reconciliação | O pedido é recusado aqui e pode ser refeito; risco registrado em `04-transacao.md` |
 | **A tarifa sai do cliente e não entra em conta nenhuma** | A conta de receita do banco foi adiada | A tarifa fica registrada na transação e no extrato |
 | **Cadastro protegido só pela API:** o banco aceitaria apagar cliente ou mudar documento | Não há rota para isso; a imutabilidade no banco foi priorizada para o dinheiro | Nenhuma rota de edição ou exclusão de cadastro |
 | **Documento do pagador e chave PIX (quando é CPF) saem inteiros** nas respostas de recebimento e envio | São dados que quem chama já informou | CPF de clientes e recebedores sai mascarado |
-| **Configuração de desenvolvimento:** senhas padrão, porta do banco publicada, `--reload` | Projeto local de estudo | Tudo vem de variável de ambiente; trocar não exige mudar código |
+| **Configuração de desenvolvimento:** senhas locais de exemplo e `--reload` | Projeto local de estudo | Tudo vem do ambiente; banco publicado apenas em loopback e owner separado do runtime |
+| **Credencial runtime comprometida ainda chama crédito/débito** | A API precisa dessas operações | Funções validam valor/estado; cofre, identidade de workload e antifraude ficam fora desta etapa |
 | **Sem trilha de auditoria separada** | Fora do escopo | `x-request-id` em toda resposta e no log; transações e movimentos imutáveis |
 
 ## 7. Evolução (fora da fase 1)
 
 O desenho da versão 6 do RFC continua sendo o caminho para produção, nesta ordem:
 
-1. **Login e autorização por objeto:** sessão curta ligada à PF ou ao representante; toda busca de conta, extrato e transação restrita ao cliente da sessão, com `404` para recurso alheio (R8); a transação passa a guardar quem pediu (ACE-07).
-2. **Autorização do envio com MFA vinculada ao valor e ao destino** ("o que você vê é o que você assina") e limites por janela de tempo.
-3. **Antifraude explicável** (valor, velocidade, destinatário novo, mudanças recentes) com a decisão e o motivo persistidos.
-4. **Onboarding com fonte oficial:** situação cadastral real, quadro de sócios, prova de vida e confirmação de e-mail e telefone.
-5. **Webhook assinado** (ou mTLS) com proteção contra replay; envio externo assíncrono com reconciliação e estorno aditivo.
-6. **Operação:** limite de requisições, segredos em cofre, privilégio mínimo no banco (a aplicação sem `UPDATE`/`DELETE` nas tabelas financeiras) e Row-Level Security como segunda barreira.
+1. **Autorização do envio com MFA vinculada ao valor e ao destino** ("o que você vê é o que você assina") e limites por janela de tempo.
+2. **Antifraude explicável** (valor, velocidade, destinatário novo, mudanças recentes) com a decisão e o motivo persistidos.
+3. **Onboarding com fonte oficial:** situação cadastral real, quadro de sócios, prova de vida e confirmação de e-mail e telefone.
+4. **Webhook assinado** (ou mTLS) com proteção contra replay; envio externo assíncrono com reconciliação e estorno aditivo.
+5. **Operação:** limite de requisições, segredos em cofre, identidade de workload, rotação de credenciais e Row-Level Security como segunda barreira.
 
 ## 8. Fontes de referência
 

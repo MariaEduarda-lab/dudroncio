@@ -47,6 +47,9 @@ class AccountController(BaseController):
             raise AccountWithBalanceCannotBeClosed()
         self.account_repository.update_status(account, new_status, reason)
         self.session.flush()
+        # updated_at e mantido pelo trigger do banco; releia a linha sem dar
+        # ao runtime permissao para escrever essa coluna diretamente.
+        self.session.refresh(account)
         response = AccountDTO.obj_to_dict(account)
         self.session.commit()
         return response
