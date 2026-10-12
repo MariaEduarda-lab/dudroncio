@@ -76,18 +76,3 @@ coverage.xml
 # --- Tipagem estática --------------------------------------
 .mypy_cache/
 .ruff_cache/
-
-# Environment & Secrets (AIOX)
-.env.local
-.env.*.local
-
-# Dependencies (AIOX)
-node_modules/
-node_modules
-
-# Build & Logs (AIOX)
-*.log
-logs/
-
-# IDE & OS (AIOX)
-Thumbs.db
