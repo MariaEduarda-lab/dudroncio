@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request
 
-from constants import BYPASS_ENDPOINTS, INTERNAL_TOKEN
+from constants import BYPASS_ENDPOINTS, CUSTOMER_ENDPOINTS, INTERNAL_TOKEN
 from errors.base_error import ForbiddenNotInternal
 from errors.handlers import qi_exception_to_response
 
@@ -9,7 +9,8 @@ def register_internal_token_middleware(application: FastAPI) -> None:
     """Deixa passar só quem manda o header INTERNAL-TOKEN com o valor certo.
 
     O valor certo vem da variável de ambiente INTERNAL_TOKEN, nunca do
-    código. As rotas de BYPASS_ENDPOINTS (raiz e health check) são públicas.
+    código. BYPASS_ENDPOINTS são públicas e CUSTOMER_ENDPOINTS têm sua
+    própria autenticação Bearer no middleware vizinho.
 
     Repare que aqui a gente DEVOLVE a resposta de erro em vez de levantar
     a exceção: dentro de um middleware, ninguém está escutando pra traduzir
@@ -20,8 +21,9 @@ def register_internal_token_middleware(application: FastAPI) -> None:
     @application.middleware("http")
     async def check_internal_token(request: Request, call_next):
         is_public = request.url.path in BYPASS_ENDPOINTS
+        is_customer = request.url.path in CUSTOMER_ENDPOINTS
 
-        if request.method == "OPTIONS" or is_public:
+        if request.method == "OPTIONS" or is_public or is_customer:
             return await call_next(request)
 
         if request.headers.get("INTERNAL-TOKEN") != INTERNAL_TOKEN:

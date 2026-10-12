@@ -1,0 +1,6 @@
+{
+  "title": "NoQueryParams",
+  "type": "object",
+  "properties": {},
+  "additionalProperties": false
+}

@@ -2,3 +2,6 @@ from controllers.client_controller import ClientController
 from controllers.account_controller import AccountController
 from controllers.transaction_controller import TransactionController
 from controllers.statement_controller import StatementController
+from controllers.authentication_controller import AuthenticationController
+from controllers.customer_account_controller import CustomerAccountController
+from controllers.onboarding_controller import OnboardingController

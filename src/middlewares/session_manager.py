@@ -137,9 +137,9 @@ def register_session_manager_middleware(application: FastAPI) -> None:
     É o mais INTERNO dos middlewares, encostado nas rotas — e por isso é
     o PRIMEIRO registrado no src/app.py, não o último (o comentário de lá
     explica por que a lista de registro é o espelho do diagrama).
-    Requisição sem o INTERNAL-TOKEN leva 403 na camada de cima e nem
-    chega aqui: quem não passou na porta não precisa de uma sessão de
-    banco.
+    Requisição interna sem INTERNAL-TOKEN ou fachada sem Bearer para na
+    camada de cima e nem chega aqui: quem não passou na porta não precisa
+    de uma sessão de banco.
 
     Duas consequências dessa posição que valem saber:
 

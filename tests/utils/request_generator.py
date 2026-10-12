@@ -8,6 +8,47 @@ INTERNAL_TOKEN = environ.get("INTERNAL_TOKEN", "default_token")
 
 class RequestGenerator:
     @staticmethod
+    def POST_onboarding(client_payload: dict, headers: dict = None) -> BaseConnectorResponse:
+        request_headers = {"INTERNAL-TOKEN": INTERNAL_TOKEN} if headers is None else headers
+        response = ClientRequisition.send("POST", "/onboarding", payload=client_payload, headers=request_headers)
+        return response.response_status, response.response_json
+
+    @staticmethod
+    def POST_auth_token(email: str, password: str) -> BaseConnectorResponse:
+        response = ClientRequisition.send(
+            "POST", "/auth/token", payload={"email": email, "password": password}
+        )
+        return response.response_status, response.response_json
+
+    @staticmethod
+    def POST_authenticated_transaction(
+        token: str | None,
+        transaction_payload: dict,
+        idempotency_key: str | None = None,
+        query_params: dict = None,
+        extra_headers: dict = None,
+    ) -> BaseConnectorResponse:
+        headers = dict(extra_headers or {})
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
+        response = ClientRequisition.send(
+            "POST", "/transactions", payload=transaction_payload, headers=headers, query_params=query_params
+        )
+        return response.response_status, response.response_json
+
+    @staticmethod
+    def GET_authenticated_statement(
+        token: str | None, query_params: dict = None, extra_headers: dict = None
+    ) -> BaseConnectorResponse:
+        headers = dict(extra_headers or {})
+        if token is not None:
+            headers["Authorization"] = f"Bearer {token}"
+        response = ClientRequisition.send("GET", "/statement", headers=headers, query_params=query_params)
+        return response.response_status, response.response_json
+
+    @staticmethod
     def POST_client(client_payload: dict) -> BaseConnectorResponse:
         response = ClientRequisition.send(
             "POST",

@@ -337,3 +337,29 @@ class InvalidStatementCursor(QIException):
             "The cursor does not identify a line of this account statement.",
             "O cursor não identifica uma linha do extrato desta conta.",
         )
+
+
+class InvalidCustomerCredentials(QIException):
+    code = "QIT007001"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Invalid credentials",
+            self.code,
+            401,
+            "The supplied customer credentials are invalid.",
+            "As credenciais informadas são inválidas.",
+        )
+
+
+class CustomerAccountNotFound(QIException):
+    code = "QIT007002"
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Customer account not found",
+            self.code,
+            404,
+            "No account is linked to the authenticated identity.",
+            "Nenhuma conta está vinculada à identidade autenticada.",
+        )

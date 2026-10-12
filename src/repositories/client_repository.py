@@ -1,6 +1,6 @@
 from uuid import UUID, uuid4
 
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import joinedload, selectinload
 
 from database import Context
 from models import Client, LegalRepresentative
@@ -76,6 +76,18 @@ class ClientRepository:
 
     def get_representative_by_email(self, email: str) -> LegalRepresentative | None:
         return self.session.query(LegalRepresentative).filter(LegalRepresentative.email == email).first()
+
+    def get_representative_by_key(self, representative_key: str) -> LegalRepresentative | None:
+        try:
+            parsed_key = UUID(representative_key)
+        except (TypeError, ValueError):
+            return None
+        return (
+            self.session.query(LegalRepresentative)
+            .options(joinedload(LegalRepresentative.client).joinedload(Client.account))
+            .filter(LegalRepresentative.representative_key == parsed_key)
+            .first()
+        )
 
     def get_representative_by_cpf(self, cpf: str) -> LegalRepresentative | None:
         return self.session.query(LegalRepresentative).filter(LegalRepresentative.cpf == cpf).first()

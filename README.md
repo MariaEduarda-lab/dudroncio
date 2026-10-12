@@ -99,9 +99,33 @@ porta nova.
 
 ## 4. Um passeio pela API
 
-Todas as rotas (menos `/` e `/health_check`) exigem o cabeçalho `INTERNAL-TOKEN`. Os comandos
+As rotas administrativas e legadas exigem `INTERNAL-TOKEN`. A fachada de cliente usa um
+Bearer emitido por `POST /auth/token`; `/` e `/health_check` são públicas. Os comandos
 abaixo funcionam no terminal do Mac e do Linux; no Windows, use o **Git Bash**. As chaves
 (`client_key`, `account_key`) nascem diferentes a cada vez: troque as dos exemplos pelas suas.
+
+**Onboarding em uma chamada e login:** `POST /onboarding` recebe o mesmo corpo de
+`POST /clients`, cria cliente e conta atomicamente e devolve ambos completos. Depois, use o
+e-mail/senha da PF ou do representante da PJ:
+
+```bash
+curl -X POST http://localhost:3000/auth/token \
+  -H "Content-Type: application/json" \
+  -d '{"email":"ana.souza@exemplo.com.br","password":"senha-forte-123"}'
+```
+
+Guarde o `access_token` retornado. Nas fachadas abaixo a conta é sempre descoberta pelo
+backend; nunca envie `account_key`:
+
+```bash
+curl -X POST http://localhost:3000/transactions \
+  -H "Authorization: Bearer <access_token>" -H "Idempotency-Key: pix-ana-0001" \
+  -H "Content-Type: application/json" \
+  -d '{"type":"PIX","amount_cents":50000,"pix_key":"destino@exemplo.com"}'
+
+curl "http://localhost:3000/statement?limit=2" \
+  -H "Authorization: Bearer <access_token>"
+```
 
 **Cadastrar uma PF:**
 
@@ -216,6 +240,10 @@ logo acima do valor. Para a próxima página, mande `?after=<next_cursor>`.
 |---|---|
 | `GET /` | diz qual serviço é este (aberta) |
 | `GET /health_check` | diz se a API está de pé (aberta, `204`) |
+| `POST /onboarding` | cria PF/PJ e uma conta ativa atomicamente (`INTERNAL-TOKEN`) |
+| `POST /auth/token` | autentica PF ou representante de PJ e emite Bearer expirável |
+| `POST /transactions` | envia Pix/TED pela conta do Bearer, sem chave de conta na entrada |
+| `GET /statement` | extrato da conta do Bearer, sem chave de conta na entrada |
 | `POST /clients` | cadastra PF ou PJ |
 | `GET /clients/{client_key}` | consulta o cliente (CPF sai mascarado) |
 | `POST /clients/{client_key}/accounts` | abre a conta (uma por cliente) |
@@ -247,6 +275,7 @@ Todo erro responde no mesmo formato, com um código próprio, e nunca com stack 
 | `QIT004…` | transação | idem |
 | `QIT005…` | tarifa | idem |
 | `QIT006…` | extrato | idem |
+| `QIT007…` | autenticação e vínculo da conta do cliente | idem |
 
 Um código nunca se repete: se repetir, a API não sobe (checagem `error_verification`, em
 `src/errors/base_error.py`).
@@ -268,6 +297,8 @@ cp .env.example .env
 | `DB_PORT` | `5432` | porta do banco na sua máquina (mude também a porta da `DATABASE_URL`) |
 | `MOCKSERVER_PORT` | `1080` | porta do Banco Central fake na sua máquina |
 | `INTERNAL_TOKEN` | `default_token` | valor exigido no cabeçalho `INTERNAL-TOKEN` |
+| `ACCESS_TOKEN_SECRET` | segredo local de exemplo | segredo exclusivo, com ao menos 32 caracteres, para assinar Bearers |
+| `ACCESS_TOKEN_TTL_SECONDS` | `3600` | validade do Bearer em segundos |
 | `CENTRAL_BANK_API_TIMEOUT` | `5` | quantos segundos o envio para outro banco espera pelo Banco Central |
 
 ---

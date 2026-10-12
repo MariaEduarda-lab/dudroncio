@@ -4,13 +4,13 @@
 |---|---|
 | **Time** | Maria Eduarda Oliveira · Pedro Siqueira |
 | **Data** | 08/10/2026 |
-| **Versão** | 7 — modelo implementado: envio síncrono, tarifa com cota mensal e extrato |
+| **Versão** | 8 — fachada autenticada por identidade, onboarding atômico e compatibilidade legada |
 
 ## Contextualização
 
 ### Entendendo o problema
 
-O sistema cadastra pessoas físicas (CPF) e jurídicas (CNPJ, com representante legal), abre uma conta para cada cliente e movimenta dinheiro só por PIX e TED: recebimentos de outros bancos, envios entre clientes do banco e envios para outros bancos. A garantia central é sobre o dinheiro: nenhum envio é executado duas vezes, nenhum saldo fica negativo e nenhum centavo é criado ou perdido, mesmo com pedidos simultâneos, cliques repetidos ou um banco externo que não responde. A tarifa precisa ser a correta para o tipo de cliente e para os envios do mês, e o extrato precisa reconstruir o saldo linha a linha. Se algo der errado, o pedido é recusado por inteiro e nada muda. Fora do escopo: login, MFA, antifraude, estorno, envio pendente com reconciliação, depósito e saque, cartões, boletos, crédito e integração real com SPI/STR.
+O sistema cadastra pessoas físicas (CPF) e jurídicas (CNPJ, com representante legal), abre uma conta para cada cliente e movimenta dinheiro só por PIX e TED: recebimentos de outros bancos, envios entre clientes do banco e envios para outros bancos. A garantia central é sobre o dinheiro: nenhum envio é executado duas vezes, nenhum saldo fica negativo e nenhum centavo é criado ou perdido, mesmo com pedidos simultâneos, cliques repetidos ou um banco externo que não responde. A tarifa precisa ser a correta para o tipo de cliente e para os envios do mês, e o extrato precisa reconstruir o saldo linha a linha. Se algo der errado, o pedido é recusado por inteiro e nada muda. Fora do escopo: MFA, refresh token, logout, antifraude, estorno, envio pendente com reconciliação, depósito e saque, cartões, boletos, crédito e integração real com SPI/STR.
 
 ### Explicando a solução de forma macro
 
@@ -25,10 +25,18 @@ Um único `Client`, discriminado por `person_type`, representa PF ou PJ; `LegalR
 
 ### Rotas
 
-Todas as rotas exigem o cabeçalho `INTERNAL-TOKEN`; sem ele, `403`. Todo erro devolve `title`, `description`, `translation` e um código `QIT…` específico; nenhuma resposta expõe id interno. Risco aceito nesta entrega: sem login, quem tem o token acessa qualquer conta, e a regra de responder `404` para recurso de outra pessoa (R8) ainda não se aplica.
+As rotas legadas e administrativas exigem `INTERNAL-TOKEN`; `/onboarding` também é interna.
+`/auth/token` autentica e-mail/senha, enquanto `/transactions` e `/statement` exigem Bearer
+expirável e resolvem `principal -> client -> account` novamente no banco. O token identifica a
+PF ou o representante da PJ e não contém `account_key`. Todo erro mantém o envelope QIT e
+nenhuma resposta expõe id interno ou segredo.
 
 | Método | Caminho | O que faz | Entrada (campos que importam) | Saídas (status e quando) |
 |---|---|---|---|---|
+| `POST` | `/onboarding` | Cadastra PF/PJ e abre a conta atomicamente | Mesmo corpo de `/clients`; `INTERNAL-TOKEN` | `201` com `{client, account}`; conflitos e validações mantêm os erros do cadastro; qualquer falha desfaz tudo. |
+| `POST` | `/auth/token` | Autentica a PF ou o representante da PJ | `email`, `password` | `200` com Bearer e TTL; `401` genérico para toda credencial inválida. |
+| `POST` | `/transactions` | Envia PIX ou TED pela conta autenticada | Bearer; `Idempotency-Key`; mesmo corpo da rota legada, sem `account_key` | Mesma semântica financeira e de idempotência da rota legada; `401` para Bearer inválido e `404` se o vínculo atual não existir. |
+| `GET` | `/statement` | Extrato da conta autenticada | Bearer; `limit`, `after`; sem `account_key` | Mesmo contrato de paginação; cursor de outra conta continua inválido. |
 | `POST` | `/clients` | Cadastra PF ou PJ | `person_type`; PF: CPF, nome, nascimento, senha; PJ: CNPJ, razão social, atividade e `legal_representative`; e-mail, contato, endereço | `201` com `client_key`; `400` campos incompatíveis com o tipo; `422` CPF/CNPJ inválido, menor de idade ou CNPJ inelegível; `409` documento, CPF de representante ou e-mail já cadastrado. Não é idempotente; as restrições únicas impedem duplicata. |
 | `GET` | `/clients/{client_key}` | Consulta cliente | `client_key` | `200`; `404` inexistente. Leitura. |
 | `POST` | `/clients/{client_key}/accounts` | Abre a conta | `client_key`; corpo vazio | `201` com `account_key`; `404` cliente inexistente; `409` cliente já tem conta (`UNIQUE(client_id)`, mesmo com pedidos simultâneos). |
