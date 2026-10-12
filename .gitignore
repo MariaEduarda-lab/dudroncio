@@ -91,12 +91,3 @@ logs/
 
 # IDE & OS (AIOX)
 Thumbs.db
-
-# AIOX Local (AIOX)
-.aiox-core/local/
-.claude/settings.local.json
-.aiox/install-log.txt
-.codex
-.github
-.aiox-core
-AGENTS.md

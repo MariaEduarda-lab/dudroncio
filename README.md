@@ -13,7 +13,37 @@ Protótipo de banco do Bootcamp QI Tech 2026: uma API REST em **Python + FastAPI
    Pix e R$ 4,99 por TED. Receber é sempre grátis.
 5. **Extrato:** paginado, do mais recente ao mais antigo, com a tarifa em linha separada.
 
+Para integrações novas, a API oferece uma **fachada inspirada em SDK**: onboarding, login,
+transação e extrato formam um fluxo curto, e a conta é identificada pelo Bearer no backend.
+As rotas que recebem `client_key` ou `account_key` continuam disponíveis somente como
+superfície interna/legada, protegida por `INTERNAL-TOKEN`.
+
 O desenho, as decisões e as alternativas descartadas estão no [RFC](rfc.md).
+
+---
+
+## Comece aqui: subir a aplicação e rodar os testes
+
+Depois de baixar o repositório e entrar nesta pasta, execute:
+
+```bash
+docker compose up -d --build --wait
+
+python3 -m venv .venv
+source .venv/bin/activate          # no Windows: .venv\Scripts\activate
+pip install -r requirements-dev.txt
+
+pytest
+```
+
+Esse é o fluxo principal da entrega: o `docker-compose.yml` sobe a API, o PostgreSQL e o
+Banco Central fake; em seguida, um único `pytest` executa os testes unitários, de integração
+e das rotas. O `docker-compose.security.yml` **não faz parte desse fluxo**: ele foi criado
+apenas como apoio a um teste isolado de privilégios do banco.
+
+Ao terminar, desligue o ambiente principal com `docker compose down`. Para executar novamente
+em outro momento, basta ativar o ambiente virtual, executar `docker compose up -d --wait` e
+rodar `pytest`; não é necessário reinstalar as dependências.
 
 ---
 
@@ -67,37 +97,61 @@ source .venv/bin/activate          # no Windows: .venv\Scripts\activate
 pip install -r requirements-dev.txt
 ```
 
-**Toda vez, com o projeto de pé (seção 2):**
+**Toda vez:**
 
 ```bash
-docker compose -p dudroncio-security -f docker-compose.security.yml up -d --build --wait
+docker compose up -d --build --wait
 pytest
-docker compose -p dudroncio-security -f docker-compose.security.yml down -v
 ```
 
+Esse comando é suficiente para testar a entrega. Os testes de privilégios que precisam de um
+banco destrutível são marcados como `skipped`; os demais testes de segurança, inclusive os de
+SQL injection, rodam normalmente contra a API padrão.
+
+Para uma verificação rápida somente do fluxo principal da fachada:
+
+```bash
+pytest \
+  tests/integration/onboarding/test_onboarding.py::test_pf_onboarding_creates_complete_active_account \
+  tests/integration/authentication/test_authentication.py::test_pf_and_pj_representative_can_login \
+  tests/integration/transaction/test_authenticated_send.py::test_authenticated_pix_uses_token_account_and_is_idempotent \
+  tests/integration/transaction/test_authenticated_send.py::test_authenticated_ted_and_account_key_injection_are_handled_safely \
+  tests/integration/statement/test_authenticated_statement.py::test_authenticated_statement_is_scoped_and_paginated
 ```
-============================= 321 passed ==============================
-```
+
+Esses são testes HTTP e precisam da API no Docker. Para rodar apenas os testes unitários,
+que não dependem dos containers: `pytest tests/unit`.
 
 Os testes de integração são **black box**: fazem requisições HTTP de verdade, como um cliente faria, e não
 importam nada de `src/` nem leem o banco. Cada teste cria os próprios clientes, com documentos
 novos, então dá para rodar a suíte várias vezes seguidas sem zerar o banco. Nos envios para
 outros bancos, o teste faz o papel do Banco Central: diz ao Mockserver se ele deve confirmar,
-recusar ou demorar (`tests/utils/central_bank_mock.py`). Testes unitários existem só para
-cálculos isolados: dígito da conta e tarifa.
+recusar ou demorar (`tests/utils/central_bank_mock.py`). Os testes unitários cobrem cálculos
+isolados e regras centrais da fachada, como token, autenticação e onboarding.
 
 | Pasta | O que cobre |
 |---|---|
 | `tests/integration/client/` | cadastro PF/PJ, documento e e-mail únicos (inclusive com pedidos simultâneos) |
 | `tests/integration/account/` | abertura de conta e mudança de status |
+| `tests/integration/onboarding/` | criação atômica de PF/PJ e conta, sem estado parcial |
+| `tests/integration/authentication/` | login, Bearer inválido e isolamento da conta autenticada |
 | `tests/integration/transaction/` | recebimento de TED e Pix, envio interno e externo, tarifa, idempotência e concorrência (20 transferências cruzadas, duplo clique, disputa pela última vaga grátis, conservação do dinheiro) |
-| `tests/integration/statement/` | extrato, paginação e a soma das linhas igual ao saldo |
-| `tests/unit/` | dígito verificador e cálculo da tarifa |
+| `tests/integration/statement/` | extrato, paginação, saldo e acesso pela identidade do Bearer |
+| `tests/unit/` | dígito, tarifa, configuração/token, autenticação e onboarding |
 | `tests/security/` | papéis/grants reais no PostgreSQL efêmero e tentativas de SQL injection |
 
-O Compose de segurança usa a porta local `55432` e `tmpfs`: não reutiliza nem persiste
-dados do banco de desenvolvimento. Sem ele, os testes PostgreSQL de privilégios são
-marcados como `skipped`; os testes de injection continuam rodando contra a API.
+O `docker-compose.security.yml` é opcional e existe somente para testar os privilégios do
+PostgreSQL sem arriscar o banco de desenvolvimento. Caso queira executar especificamente esse
+teste isolado, use:
+
+```bash
+docker compose -p dudroncio-security -f docker-compose.security.yml up -d --build --wait
+pytest tests/security/test_database_privileges.py
+docker compose -p dudroncio-security -f docker-compose.security.yml down -v
+```
+
+Esse Compose usa a porta local `55432` e `tmpfs`, portanto seus dados são descartáveis. Ele
+não sobe outra API e não é necessário para testar as rotas.
 
 Os testes leem o seu `.env` (seção 7): se você trocar uma porta ali, eles passam a usar a
 porta nova.
@@ -111,9 +165,21 @@ Bearer emitido por `POST /auth/token`; `/` e `/health_check` são públicas. Os 
 abaixo funcionam no terminal do Mac e do Linux; no Windows, use o **Git Bash**. As chaves
 (`client_key`, `account_key`) nascem diferentes a cada vez: troque as dos exemplos pelas suas.
 
-**Onboarding em uma chamada e login:** `POST /onboarding` recebe o mesmo corpo de
-`POST /clients`, cria cliente e conta atomicamente e devolve ambos completos. Depois, use o
-e-mail/senha da PF ou do representante da PJ:
+**Onboarding em uma chamada e login:** `POST /onboarding` cria cliente e conta atomicamente
+e devolve ambos completos. O integrador chama essa rota com o token interno:
+
+```bash
+curl -X POST http://localhost:3000/onboarding \
+  -H "INTERNAL-TOKEN: default_token" -H "Content-Type: application/json" \
+  -d '{"person_type":"PF","document_number":"529.982.247-25","full_name":"Ana Souza",
+       "birthdate":"1995-08-21","password":"senha-forte-123","monthly_income_cents":750000,
+       "email":"ana.souza@exemplo.com.br","phone_number":"+5511977777777",
+       "address":{"street":"Avenida Paulista","number":"1000","neighborhood":"Bela Vista",
+                  "city":"Sao Paulo","state":"SP","postal_code":"01310100","country":"BR"}}'
+```
+
+A resposta `201` contém `{ "client": {...}, "account": {...} }`. Depois, a pessoa usa o
+e-mail e a senha da PF ou do representante da PJ para obter seu Bearer:
 
 ```bash
 curl -X POST http://localhost:3000/auth/token \
@@ -134,7 +200,14 @@ curl "http://localhost:3000/statement?limit=2" \
   -H "Authorization: Bearer <access_token>"
 ```
 
-**Cadastrar uma PF:**
+### Fluxo interno/legado (compatibilidade)
+
+Os exemplos seguintes demonstram as operações administrativas granulares e os webhooks.
+Eles exigem `INTERNAL-TOKEN` e alguns recebem `client_key` ou `account_key`; não devem ser
+expostos diretamente ao usuário final. O fluxo de cliente recomendado é a fachada acima.
+
+**Cadastrar uma PF pela rota legada (alternativa ao onboarding):** se você já criou a Ana
+no exemplo anterior, pule este comando ou troque CPF e e-mail; identidades são únicas.
 
 ```bash
 curl -X POST http://localhost:3000/clients \
@@ -243,23 +316,23 @@ logo acima do valor. Para a próxima página, mande `?after=<next_cursor>`.
 
 ## 5. Todas as rotas
 
-| Método e rota | O que faz |
-|---|---|
-| `GET /` | diz qual serviço é este (aberta) |
-| `GET /health_check` | diz se a API está de pé (aberta, `204`) |
-| `POST /onboarding` | cria PF/PJ e uma conta ativa atomicamente (`INTERNAL-TOKEN`) |
-| `POST /auth/token` | autentica PF ou representante de PJ e emite Bearer expirável |
-| `POST /transactions` | envia Pix/TED pela conta do Bearer, sem chave de conta na entrada |
-| `GET /statement` | extrato da conta do Bearer, sem chave de conta na entrada |
-| `POST /clients` | cadastra PF ou PJ |
-| `GET /clients/{client_key}` | consulta o cliente (CPF sai mascarado) |
-| `POST /clients/{client_key}/accounts` | abre a conta (uma por cliente) |
-| `GET /accounts/{account_key}` | consulta a conta e o saldo |
-| `PATCH /accounts/{account_key}` | bloqueia, reativa ou encerra, com motivo (encerrar só com saldo zero) |
-| `POST /accounts/{account_key}/transactions` | envia Pix (`pix_key`) ou TED (banco, agência, conta e dígito) |
-| `POST /webhook/central_bank/teds` | TED recebida de outro banco |
-| `POST /webhook/central_bank/pix` | Pix recebido de outro banco (pela chave: CPF, CNPJ ou e-mail) |
-| `GET /accounts/{account_key}/statement` | extrato paginado (`limit` de 1 a 100, padrão 50; `after`) |
+| Método e rota | Superfície e autenticação | O que faz |
+|---|---|---|
+| `GET /` | pública | diz qual serviço é este |
+| `GET /health_check` | pública | diz se a API está de pé (`204`) |
+| `POST /auth/token` | credenciais do cliente | autentica PF ou representante de PJ e emite Bearer expirável |
+| `POST /onboarding` | fachada, `INTERNAL-TOKEN` | cria PF/PJ e uma conta ativa atomicamente |
+| `POST /transactions` | fachada, Bearer | envia Pix/TED pela conta associada à identidade autenticada |
+| `GET /statement` | fachada, Bearer | consulta o extrato da conta associada à identidade autenticada |
+| `POST /clients` | interna/legada, `INTERNAL-TOKEN` | cadastra PF ou PJ |
+| `GET /clients/{client_key}` | interna/legada, `INTERNAL-TOKEN` | consulta o cliente (CPF sai mascarado) |
+| `POST /clients/{client_key}/accounts` | interna/legada, `INTERNAL-TOKEN` | abre a conta (uma por cliente) |
+| `GET /accounts/{account_key}` | interna/legada, `INTERNAL-TOKEN` | consulta a conta e o saldo |
+| `PATCH /accounts/{account_key}` | interna/legada, `INTERNAL-TOKEN` | bloqueia, reativa ou encerra, com motivo (encerrar só com saldo zero) |
+| `POST /accounts/{account_key}/transactions` | interna/legada, `INTERNAL-TOKEN` | envia Pix (`pix_key`) ou TED (banco, agência, conta e dígito) |
+| `GET /accounts/{account_key}/statement` | interna/legada, `INTERNAL-TOKEN` | extrato paginado (`limit` de 1 a 100, padrão 50; `after`) |
+| `POST /webhook/central_bank/teds` | integração, `INTERNAL-TOKEN` | recebe TED de outro banco |
+| `POST /webhook/central_bank/pix` | integração, `INTERNAL-TOKEN` | recebe Pix de outro banco (pela chave: CPF, CNPJ ou e-mail) |
 
 Os status de cada rota (`400`, `404`, `409`, `422`, `503`) e o que torna cada uma idempotente
 estão na tabela de rotas do [RFC](rfc.md).
@@ -300,6 +373,9 @@ cp .env.example .env
 
 | Variável | Padrão | Para quê |
 |---|---|---|
+| `APP_ENV` | `local` | ambiente e nível de log (`local`, `test` ou `production`) |
+| `SERVICE_NAME` | `bootcamp-api` | nome exibido na raiz e nos logs |
+| `DATABASE_URL` | veja `.env.example` | conexão usada por processos executados fora do Compose |
 | `API_PORT` | `3000` | porta da API na sua máquina |
 | `DB_PORT` | `5432` | porta do banco na sua máquina (mude também a porta da `DATABASE_URL`) |
 | `APPLICATION_DB_PASSWORD` | senha runtime local de exemplo | senha do `application_user`, único papel entregue à API |
@@ -309,6 +385,8 @@ cp .env.example .env
 | `INTERNAL_TOKEN` | `default_token` | valor exigido no cabeçalho `INTERNAL-TOKEN` |
 | `ACCESS_TOKEN_SECRET` | segredo local de exemplo | segredo exclusivo, com ao menos 32 caracteres, para assinar Bearers |
 | `ACCESS_TOKEN_TTL_SECONDS` | `3600` | validade do Bearer em segundos |
+| `SERVER_LOCALHOST` | `0.0.0.0` | host no qual os testes procuram a API |
+| `CENTRAL_BANK_API_INTERNAL_TOKEN` | `default_token` | credencial enviada ao Banco Central fake |
 | `CENTRAL_BANK_API_TIMEOUT` | `5` | quantos segundos o envio para outro banco espera pelo Banco Central |
 
 ---
@@ -376,6 +454,22 @@ bug virar dado errado.
 
 ---
 
-## 10. A licença
+## 10. Limitações importantes
+
+Esta entrega é um protótipo funcional, não um core bancário pronto para produção. Entre as
+limitações aceitas estão: `INTERNAL-TOKEN` único para integrações internas; Bearer sem refresh,
+revogação ou MFA; ausência de rate limiting; comunicação síncrona com um Banco Central fake;
+e ausência de conciliação, estorno, chargeback, observabilidade e gestão de segredos de
+produção. As rotas legadas com chaves explícitas permanecem apenas por compatibilidade.
+
+O banco restringe o usuário da aplicação, impede alterações diretas em saldos e lançamentos
+e o código usa consultas parametrizadas contra SQL injection. Isso reduz o risco, mas não
+substitui migrações controladas, rotação de credenciais, auditoria externa e testes de
+segurança contínuos. O escopo, os riscos aceitos e a evolução recomendada estão detalhados no
+[RFC](rfc.md#limitações-e-riscos-aceitos).
+
+---
+
+## 11. A licença
 
 **MIT** — veja o arquivo `LICENSE`.
