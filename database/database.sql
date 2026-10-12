@@ -365,3 +365,99 @@ CREATE TRIGGER tg_account_movement_no_truncate
 -- Extrato: movimentos de uma conta, do mais recente para o mais antigo,
 -- em paginas que continuam a partir do id da ultima linha vista.
 CREATE INDEX ix_account_movement_statement ON account_movement (account_id, id DESC);
+
+-- A API nao recebe UPDATE no saldo. Estas duas rotinas pequenas sao o unico
+-- caminho de runtime para altera-lo: validam valor/status no mesmo UPDATE e
+-- devolvem NULL quando a operacao nao e aplicavel.
+CREATE FUNCTION credit_account(p_account_id BIGINT, p_amount_cents BIGINT)
+RETURNS BIGINT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    new_balance BIGINT;
+BEGIN
+    IF p_amount_cents IS NULL OR p_amount_cents <= 0 THEN
+        RETURN NULL;
+    END IF;
+
+    UPDATE public.account
+       SET balance_cents = balance_cents + p_amount_cents
+     WHERE id = p_account_id
+       AND status = 'ACTIVE'
+    RETURNING balance_cents INTO new_balance;
+
+    RETURN new_balance;
+END;
+$$;
+
+CREATE FUNCTION debit_account(p_account_id BIGINT, p_amount_cents BIGINT)
+RETURNS BIGINT
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog
+AS $$
+DECLARE
+    new_balance BIGINT;
+BEGIN
+    IF p_amount_cents IS NULL OR p_amount_cents <= 0 THEN
+        RETURN NULL;
+    END IF;
+
+    UPDATE public.account
+       SET balance_cents = balance_cents - p_amount_cents
+     WHERE id = p_account_id
+       AND status = 'ACTIVE'
+       AND balance_cents >= p_amount_cents
+    RETURNING balance_cents INTO new_balance;
+
+    RETURN new_balance;
+END;
+$$;
+
+-- Objetos futuros nao herdam acesso amplo. Os grants abaixo espelham apenas
+-- as operacoes emitidas pelos repositories atuais.
+ALTER DEFAULT PRIVILEGES FOR ROLE database_owner IN SCHEMA public
+    REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE database_owner IN SCHEMA public
+    REVOKE ALL ON TABLES FROM PUBLIC;
+ALTER DEFAULT PRIVILEGES FOR ROLE database_owner IN SCHEMA public
+    REVOKE ALL ON SEQUENCES FROM PUBLIC;
+
+REVOKE ALL ON ALL TABLES IN SCHEMA public FROM PUBLIC;
+REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC;
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA public FROM PUBLIC;
+
+GRANT USAGE ON SCHEMA public TO application_user;
+GRANT SELECT ON client, legal_representative, registered_email, account,
+    tariff_rule, transaction, account_movement TO application_user;
+GRANT INSERT (
+    client_key, person_type, document_number, full_name, birthdate,
+    password_hash, legal_name, trade_name, cnpj_status, primary_activity,
+    monthly_income_cents, email, phone_number, address
+) ON client TO application_user;
+GRANT INSERT (
+    representative_key, client_id, cpf, full_name, birthdate, email,
+    phone_number, role, password_hash
+) ON legal_representative TO application_user;
+GRANT INSERT (email) ON registered_email TO application_user;
+GRANT INSERT (account_key, client_id, account_number, check_digit, status, status_reason)
+    ON account TO application_user;
+GRANT INSERT (
+    transaction_key, type, direction, amount_cents, fee_cents, tariff_rule_id,
+    source_account_id, destination_account_id, idempotency_key,
+    external_reference, request_fingerprint, counterparty_name,
+    counterparty_document, counterparty_bank_code, counterparty_branch,
+    counterparty_account_number, pix_key
+) ON transaction TO application_user;
+GRANT INSERT (
+    movement_key, account_id, transaction_id, direction, movement_type,
+    amount_cents, balance_after_cents
+) ON account_movement TO application_user;
+GRANT UPDATE (status, status_reason) ON account TO application_user;
+GRANT USAGE ON SEQUENCE client_id_seq, legal_representative_id_seq,
+    account_id_seq, transaction_id_seq, account_movement_id_seq
+    TO application_user;
+GRANT EXECUTE ON FUNCTION credit_account(BIGINT, BIGINT) TO application_user;
+GRANT EXECUTE ON FUNCTION debit_account(BIGINT, BIGINT) TO application_user;

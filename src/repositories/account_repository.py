@@ -1,6 +1,6 @@
 from uuid import UUID, uuid4
 
-from sqlalchemy import update
+from sqlalchemy import text
 from sqlalchemy.orm import joinedload
 
 from database import Context
@@ -19,7 +19,6 @@ class AccountRepository:
             client=client,
             account_number=account_number,
             check_digit=check_digit,
-            balance_cents=0,
             status=Account.CREATED,
         )
         self.session.add(account)
@@ -78,14 +77,8 @@ class AccountRepository:
         nunca e lido, calculado no Python e gravado de volta.
         """
         return self.session.execute(
-            update(Account)
-            .where(
-                Account.id == account_id,
-                Account.status == Account.ACTIVE,
-                Account.balance_cents >= amount_cents,
-            )
-            .values(balance_cents=Account.balance_cents - amount_cents)
-            .returning(Account.balance_cents)
+            text("SELECT public.debit_account(:account_id, :amount_cents)"),
+            {"account_id": account_id, "amount_cents": amount_cents},
         ).scalar_one_or_none()
 
     def credit(self, account_id: int, amount_cents: int) -> int | None:
@@ -97,10 +90,8 @@ class AccountRepository:
         nao esta ativa (TRA-25).
         """
         return self.session.execute(
-            update(Account)
-            .where(Account.id == account_id, Account.status == Account.ACTIVE)
-            .values(balance_cents=Account.balance_cents + amount_cents)
-            .returning(Account.balance_cents)
+            text("SELECT public.credit_account(:account_id, :amount_cents)"),
+            {"account_id": account_id, "amount_cents": amount_cents},
         ).scalar_one_or_none()
 
     def _query_by_key(self, account_key: str):

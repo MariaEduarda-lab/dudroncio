@@ -45,7 +45,7 @@ Sobem três serviços:
 | Serviço | O que é | Porta na sua máquina |
 |---|---|---|
 | `api` | a API do banco | `3000` |
-| `db` | o PostgreSQL, já com as tabelas e a tabela de tarifas | `5432` |
+| `db` | o PostgreSQL, já com as tabelas e a tabela de tarifas (somente `127.0.0.1`) | `5432` |
 | `mockserver` | o **Banco Central fake**, que confirma ou recusa os envios para outros bancos | `1080` |
 
 Confira: http://localhost:3000 responde `{"service":"bootcamp-api","id":"8"}`.
@@ -70,14 +70,16 @@ pip install -r requirements-dev.txt
 **Toda vez, com o projeto de pé (seção 2):**
 
 ```bash
+docker compose -p dudroncio-security -f docker-compose.security.yml up -d --build --wait
 pytest
+docker compose -p dudroncio-security -f docker-compose.security.yml down -v
 ```
 
 ```
-============================= 288 passed in 22s ==============================
+============================= 321 passed ==============================
 ```
 
-Os testes são **black box**: fazem requisições HTTP de verdade, como um cliente faria, e não
+Os testes de integração são **black box**: fazem requisições HTTP de verdade, como um cliente faria, e não
 importam nada de `src/` nem leem o banco. Cada teste cria os próprios clientes, com documentos
 novos, então dá para rodar a suíte várias vezes seguidas sem zerar o banco. Nos envios para
 outros bancos, o teste faz o papel do Banco Central: diz ao Mockserver se ele deve confirmar,
@@ -91,6 +93,11 @@ cálculos isolados: dígito da conta e tarifa.
 | `tests/integration/transaction/` | recebimento de TED e Pix, envio interno e externo, tarifa, idempotência e concorrência (20 transferências cruzadas, duplo clique, disputa pela última vaga grátis, conservação do dinheiro) |
 | `tests/integration/statement/` | extrato, paginação e a soma das linhas igual ao saldo |
 | `tests/unit/` | dígito verificador e cálculo da tarifa |
+| `tests/security/` | papéis/grants reais no PostgreSQL efêmero e tentativas de SQL injection |
+
+O Compose de segurança usa a porta local `55432` e `tmpfs`: não reutiliza nem persiste
+dados do banco de desenvolvimento. Sem ele, os testes PostgreSQL de privilégios são
+marcados como `skipped`; os testes de injection continuam rodando contra a API.
 
 Os testes leem o seu `.env` (seção 7): se você trocar uma porta ali, eles passam a usar a
 porta nova.
@@ -295,6 +302,9 @@ cp .env.example .env
 |---|---|---|
 | `API_PORT` | `3000` | porta da API na sua máquina |
 | `DB_PORT` | `5432` | porta do banco na sua máquina (mude também a porta da `DATABASE_URL`) |
+| `APPLICATION_DB_PASSWORD` | senha runtime local de exemplo | senha do `application_user`, único papel entregue à API |
+| `DATABASE_OWNER_PASSWORD` | senha owner local de exemplo | bootstrap/manutenção; não entra no container da API |
+| `POSTGRES_DB` | `bootcamp` | nome do banco local |
 | `MOCKSERVER_PORT` | `1080` | porta do Banco Central fake na sua máquina |
 | `INTERNAL_TOKEN` | `default_token` | valor exigido no cabeçalho `INTERNAL-TOKEN` |
 | `ACCESS_TOKEN_SECRET` | segredo local de exemplo | segredo exclusivo, com ao menos 32 caracteres, para assinar Bearers |
@@ -318,6 +328,11 @@ também a porta da `DATABASE_URL`, no mesmo arquivo.
 **Mudou o `database/database.sql` e nada aconteceu.** Ele só roda quando o banco nasce.
 Recomece do zero: `docker compose down -v && docker compose up -d --wait` (apaga os dados).
 
+**Banco exposto na rede.** No desenvolvimento a porta é vinculada somente a
+`127.0.0.1`; a API usa `db:5432` pela rede interna do Compose. Em produção, não publique
+a porta do PostgreSQL. Entregue ao processo da API somente a URL do `application_user`;
+a credencial `database_owner` serve exclusivamente a migrações versionadas.
+
 **Para ver o que a API está dizendo:** `docker compose logs -f api`. Toda resposta traz um
 cabeçalho `x-request-id`, que aparece nas linhas do log daquela requisição.
 
@@ -340,9 +355,11 @@ src/
   connectors/     ← as conversas com outros serviços (Banco Central fake)
   utils/          ← cálculos sem camada: documento, dígito, tarifa, chave Pix
 database/
-  database.sql    ← as tabelas, as restrições e os dados iniciais (tarifas)
+  init-runtime-role.sh ← cria e restringe o papel usado pela API
+  database.sql    ← tabelas, funções de saldo, grants e tarifas
 tests/
   integration/    ← testes black box, por assunto
+  security/       ← privilégios reais e entradas hostis
   unit/           ← cálculos isolados
 ```
 

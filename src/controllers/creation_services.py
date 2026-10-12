@@ -130,5 +130,6 @@ class AccountCreator:
                 raise
             self.repository.update_status(account, Account.ACTIVE, None)
             self.repository.session.flush()
+            self.repository.session.refresh(account)
             return account
         raise RuntimeError("Nao foi possivel sortear um numero de conta livre.")
